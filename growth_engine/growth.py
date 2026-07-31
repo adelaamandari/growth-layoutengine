@@ -22,14 +22,27 @@ from .geometry import Point, polygons_overlap
 from .components import walk_rectangle, WallSegment
 from .catalog import UnitType, get_unit
 
-CORRIDOR_WIDTH_CM = 1700.0
+# NOTE ON UNITS: everything in this engine is CENTIMETRES. The constants
+# below were originally transcribed straight off the drawings in MM and
+# stored in _CM fields, which made the corridor 17m wide and the core a
+# 17x17m room. Anything sourced from Rhino (unit footprints, the 300/600
+# storey heights) was always correct cm -- only these hand-typed values
+# were off, uniformly by 10x.
+CORRIDOR_WIDTH_CM = 170.0        # 1.7m total width, walls included
 CORRIDOR_HALF = CORRIDOR_WIDTH_CM / 2
-CORE_SIZE_CM = 1700.0
+CORE_SIZE_CM = 170.0             # 1.7x1.7m -- see PROJECT_SUMMARY, may need revisiting
 CORE_HALF = CORE_SIZE_CM / 2
-ENTRY_CORRIDOR_BAYS_CM = 3400.0  # entrance straight run before reaching core
+ENTRY_CORRIDOR_BAYS_CM = 340.0   # entrance straight run before reaching core (2 bays)
 
-COMMUNAL_WIDTH_RANGE = (2000.0, 4000.0)
-COMMUNAL_DEPTH_CM = 1700.0
+# Communal rooms have no surveyed geometry, so these stay placeholders --
+# but they are now sized against the real unit catalog (6m frontage,
+# 4-7m deep = 24-42 sqm) rather than left at the old 17m x 20-40m, which
+# was absurd next to a 1.7m corridor. Replace with real numbers when the
+# communal catalog defines them.
+# Naming is inherited and misleading: _DEPTH_CM is the FRONTAGE measured
+# along the corridor; _WIDTH_RANGE is the extent perpendicular to it.
+COMMUNAL_WIDTH_RANGE = (400.0, 700.0)
+COMMUNAL_DEPTH_CM = 600.0
 
 
 @dataclass
