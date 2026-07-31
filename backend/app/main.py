@@ -1,0 +1,247 @@
+"""
+main.py
+FastAPI wrapper around growth_engine.
+
+The engine itself stays a pure-stdlib library with no web dependency --
+this module is a thin adapter over it, so the engine remains usable
+from a plain Python REPL, from Claude Code, and (eventually) from a
+GHPython adapter, exactly as PROJECT_SUMMARY intends.
+
+Run:
+    cd backend
+    uvicorn app.main:app --reload --port 8000
+"""
+
+from __future__ import annotations
+
+import io
+import json
+
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
+
+from growth_engine import (
+    UNIT_CATALOG,
+    generate_floorplan,
+    generate_massing,
+    generate_room_massing,
+    massing_summary,
+    plan_to_obj,
+)
+from growth_engine.growth import CORE_SIZE_CM, CORRIDOR_WIDTH_CM
+from growth_engine.preview import render_svg
+
+from growth_engine.diagnostics import shared_boundaries, wall_length
+
+from .schemas import (
+    RESIDENTIAL,
+    BlockOut,
+    CatalogResponse,
+    ElementOut,
+    MassingResponse,
+    PlanRequest,
+    PlanResponse,
+    RoomInfo,
+    RoomOut,
+    SharedSegment,
+    UnitInfo,
+    WallOut,
+)
+
+app = FastAPI(
+    title="LinX Growth Engine API",
+    description="Generative floor plan + massing engine for the timber joinery system.",
+    version="0.1.0",
+)
+
+# The Vite dev server runs on 5173; the preview build on 4173.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173", "http://127.0.0.1:5173",
+        "http://localhost:4173", "http://127.0.0.1:4173",
+    ],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+def _build_plan(req: PlanRequest):
+    """Generate a plan, raising a 400 rather than a 500 for a bad program."""
+    if not req.program:
+        raise HTTPException(400, "program is empty")
+    try:
+        return generate_floorplan(program=list(req.program), seed=req.seed)
+    except KeyError as e:
+        raise HTTPException(400, f"unknown unit type: {e}") from e
+
+
+def _classify_program(program: list[str]) -> tuple[list[str], list[str]]:
+    """
+    The engine treats ANY key it doesn't recognise as a flexible communal
+    room -- that is deliberate (it's how SK/SL work), but it means a typo
+    silently becomes a blank box instead of failing. We can't reject
+    unknown keys without breaking communal rooms, so instead report them:
+    `communal` is every non-catalog key, and `suspect` is the subset that
+    looks like a misspelt unit type, which the UI can warn about.
+    """
+    communal, suspect = [], []
+    lower = {k.lower(): k for k in UNIT_CATALOG}
+    for key in dict.fromkeys(program):
+        if key in UNIT_CATALOG:
+            continue
+        communal.append(key)
+        k = key.lower()
+        if k in lower or any(k.startswith(c[:6]) for c in lower):
+            suspect.append(key)
+    return communal, suspect
+
+
+def _room_polys(el):
+    """World-space room polygons, mirroring massing.generate_room_massing."""
+    from growth_engine.catalog import get_unit
+    from growth_engine.geometry import Point, normalize
+
+    try:
+        unit = get_unit(el.label)
+    except KeyError:
+        return []
+    if not unit.has_real_rooms:
+        return []
+    c1, c2, _c3, c4 = el.corners
+    along = normalize(Point(c2.x - c1.x, c2.y - c1.y))
+    out = normalize(Point(c4.x - c1.x, c4.y - c1.y))
+    result = []
+    for room in unit.rooms:
+        poly = []
+        for rx, ry in ((room.x_min, room.y_min), (room.x_max, room.y_min),
+                       (room.x_max, room.y_max), (room.x_min, room.y_max)):
+            p = c1 + along.scaled(rx) + out.scaled(ry)
+            poly.append([round(p.x, 2), round(p.y, 2)])
+        result.append(RoomOut(name=room.name, poly=poly,
+                              z_min=room.z_min, height_cm=room.height_cm))
+    return result
+
+
+@app.get("/api/health")
+def health() -> dict:
+    return {"ok": True, "units": len(UNIT_CATALOG)}
+
+
+@app.get("/api/catalog", response_model=CatalogResponse)
+def catalog() -> CatalogResponse:
+    units = []
+    for name in sorted(UNIT_CATALOG):
+        u = UNIT_CATALOG[name]
+        units.append(UnitInfo(
+            name=u.name, width_cm=u.width_cm, depth_cm=u.depth_cm,
+            height_cm=u.height_cm, floors=u.floors,
+            object_count=u.object_count, has_real_rooms=u.has_real_rooms,
+            footprint_area_m2=round(u.footprint_area_m2, 2),
+            rooms=[RoomInfo(name=r.name, width_cm=round(r.width_cm, 1),
+                            depth_cm=round(r.depth_cm, 1),
+                            height_cm=round(r.height_cm, 1),
+                            z_min=round(r.z_min, 1),
+                            area_m2=round(r.area_m2, 2)) for r in u.rooms],
+        ))
+    return CatalogResponse(
+        units=units,
+        communal_keys=["SK", "SL"],
+        residential_keys=list(RESIDENTIAL),
+        corridor_width_cm=CORRIDOR_WIDTH_CM,
+        core_size_cm=CORE_SIZE_CM,
+    )
+
+
+@app.post("/api/plan", response_model=PlanResponse)
+def plan(req: PlanRequest) -> PlanResponse:
+    fp = _build_plan(req)
+
+    elements = [
+        ElementOut(
+            kind=el.kind, label=el.label, height_cm=el.height_cm,
+            corners=[[round(c.x, 2), round(c.y, 2)] for c in el.corners],
+            walls=[WallOut(c=w.component,
+                           p=[round(w.start.x, 2), round(w.start.y, 2),
+                              round(w.end.x, 2), round(w.end.y, 2)])
+                   for w in el.walls],
+            rooms=_room_polys(el),
+        )
+        for el in fp.elements
+    ]
+
+    xs = [c[0] for e in elements for c in e.corners]
+    ys = [c[1] for e in elements for c in e.corners]
+
+    perim = wall_length(fp.elements)
+    shared_len, shared_segs = shared_boundaries(fp.elements)
+
+    footprint = 0.0
+    for e in elements:
+        ex = [c[0] for c in e.corners]
+        ey = [c[1] for c in e.corners]
+        footprint += (max(ex) - min(ex)) * (max(ey) - min(ey)) / 10000
+
+    return PlanResponse(
+        elements=elements,
+        shared_segments=[SharedSegment(**s) for s in shared_segs],
+        entrance=[fp.entrance.x, fp.entrance.y],
+        core_position=[fp.core_position.x, fp.core_position.y],
+        unit_counts=fp.unit_counts,
+        missing=[p for p in req.program if p not in fp.unit_counts],
+        communal=_classify_program(req.program)[0],
+        suspect=_classify_program(req.program)[1],
+        extent_cm=[min(xs), min(ys), max(xs), max(ys)],
+        stats={
+            "wall_length_m": round(perim / 100, 1),
+            "shared_length_m": round(shared_len / 100, 1),
+            "shared_pct": round(100 * shared_len / (perim - shared_len), 1) if perim > shared_len else 0.0,
+            "footprint_m2": round(footprint, 1),
+            "shared_count": float(len(shared_segs)),
+        },
+    )
+
+
+@app.post("/api/massing", response_model=MassingResponse)
+def massing(req: PlanRequest) -> MassingResponse:
+    fp = _build_plan(req)
+    blocks = generate_room_massing(fp) if req.per_room else generate_massing(fp)
+    return MassingResponse(
+        blocks=[BlockOut(kind=b.kind, label=b.label,
+                         base_corners=[[round(c.x, 2), round(c.y, 2)] for c in b.base_corners],
+                         z0=round(b.z0, 2), z1=round(b.z1, 2)) for b in blocks],
+        summary=massing_summary(blocks),
+    )
+
+
+@app.post("/api/export/obj")
+def export_obj(req: PlanRequest) -> Response:
+    fp = _build_plan(req)
+    body = plan_to_obj(fp, per_room=req.per_room)
+    return Response(
+        content=body, media_type="model/obj",
+        headers={"Content-Disposition": 'attachment; filename="growth_engine.obj"'},
+    )
+
+
+@app.post("/api/export/svg")
+def export_svg(req: PlanRequest) -> Response:
+    fp = _build_plan(req)
+    body = render_svg(fp, title=f"Generated floor plan - seed {req.seed}")
+    return Response(
+        content=body, media_type="image/svg+xml",
+        headers={"Content-Disposition": 'attachment; filename="plan.svg"'},
+    )
+
+
+@app.post("/api/export/json")
+def export_json(req: PlanRequest) -> Response:
+    from growth_engine.preview import plan_to_dict
+
+    fp = _build_plan(req)
+    body = json.dumps(plan_to_dict(fp), indent=2)
+    return Response(
+        content=body, media_type="application/json",
+        headers={"Content-Disposition": 'attachment; filename="plan.json"'},
+    )

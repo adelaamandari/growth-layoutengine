@@ -12,6 +12,12 @@ dist/
 venv/
 env/
 
+# Node / frontend
+node_modules/
+dist/
+.vite/
+*.local
+
 # Generated previews
 /plan*.svg
 

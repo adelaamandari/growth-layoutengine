@@ -1,0 +1,120 @@
+"""
+schemas.py
+Request/response models for the growth engine API.
+
+All geometry crosses the wire in CENTIMETRES, matching the engine's
+internal units. The frontend converts for display; nothing converts on
+the way out, so there is exactly one place a unit error can be
+introduced (and see growth.py for what happened last time there were
+two).
+"""
+
+from __future__ import annotations
+
+from pydantic import BaseModel, Field
+
+# Keys the engine treats as real residential units; anything else in a
+# program is built as a flexible communal room.
+RESIDENTIAL = (
+    "Studio_A", "Studio_B", "1Bed_A", "1Bed_B", "2Bed_A",
+    "2Bed_B", "3Bed_A", "3Bed_B", "4Bed_A", "4Bed_B",
+)
+
+DEFAULT_PROGRAM = [
+    "Studio_A", "Studio_B", "1Bed_A", "1Bed_B", "SK", "2Bed_A",
+    "2Bed_B", "SL", "3Bed_A", "3Bed_B", "4Bed_A", "4Bed_B",
+]
+
+
+class PlanRequest(BaseModel):
+    program: list[str] = Field(default_factory=lambda: list(DEFAULT_PROGRAM))
+    seed: int | None = 42
+    per_room: bool = True
+
+
+class RoomOut(BaseModel):
+    name: str
+    poly: list[list[float]]
+    z_min: float
+    height_cm: float
+
+
+class WallOut(BaseModel):
+    c: str                # "N" | "SA" | "SB" | "SC"
+    p: list[float]        # [x1, y1, x2, y2]
+
+
+class ElementOut(BaseModel):
+    kind: str             # "corridor" | "core" | "unit" | "communal"
+    label: str
+    height_cm: float
+    corners: list[list[float]]
+    walls: list[WallOut]
+    rooms: list[RoomOut]
+
+
+class SharedSegment(BaseModel):
+    """One stretch of wall that two elements both build. See
+    growth_engine.diagnostics for why this is worth reporting."""
+    a: str
+    b: str
+    length_cm: float
+    p: list[float]        # [x1, y1, x2, y2]
+
+
+class PlanResponse(BaseModel):
+    elements: list[ElementOut]
+    shared_segments: list[SharedSegment]
+    entrance: list[float]
+    core_position: list[float]
+    unit_counts: dict[str, int]
+    missing: list[str]
+    # Keys the engine built as flexible communal rooms because it did not
+    # recognise them. `suspect` is the subset that looks like a misspelt
+    # unit type -- see _classify_program in main.py.
+    communal: list[str]
+    suspect: list[str]
+    extent_cm: list[float]
+    stats: dict[str, float]
+
+
+class BlockOut(BaseModel):
+    kind: str
+    label: str
+    base_corners: list[list[float]]
+    z0: float
+    z1: float
+
+
+class MassingResponse(BaseModel):
+    blocks: list[BlockOut]
+    summary: dict[str, dict]
+
+
+class RoomInfo(BaseModel):
+    name: str
+    width_cm: float
+    depth_cm: float
+    height_cm: float
+    z_min: float
+    area_m2: float
+
+
+class UnitInfo(BaseModel):
+    name: str
+    width_cm: float
+    depth_cm: float
+    height_cm: float
+    floors: int
+    object_count: int
+    has_real_rooms: bool
+    footprint_area_m2: float
+    rooms: list[RoomInfo]
+
+
+class CatalogResponse(BaseModel):
+    units: list[UnitInfo]
+    communal_keys: list[str]
+    residential_keys: list[str]
+    corridor_width_cm: float
+    core_size_cm: float

@@ -1,0 +1,10 @@
+# The growth_engine package itself needs NOTHING beyond the standard
+# library -- that is deliberate, so it stays runnable without a server
+# and portable to a GHPython adapter later. Everything below is for the
+# API layer only.
+fastapi>=0.115
+uvicorn[standard]>=0.30
+
+# Optional: only growth_engine.site.osm_site_finder needs this, for
+# live Overpass queries. The module imports without it.
+requests>=2.31
