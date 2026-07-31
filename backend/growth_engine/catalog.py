@@ -3,18 +3,20 @@ catalog.py
 Real per-unit-type footprint, height, and now per-ROOM geometry, sourced
 from Adela's Rhino exports (export_unit_wall_infills.py output).
 
-Two tiers of data quality, by design:
-  - Studio_A, Studio_B, 1Bed_A, 1Bed_B, 2Bed_A, 2Bed_B have real
-    per-room bounding boxes (unit.rooms is populated) -- these come
-    from the JSON files bundled in unit_exports/.
-  - 3Bed_A, 3Bed_B, 4Bed_A, 4Bed_B do not have per-room exports yet
-    (unit.rooms is empty) -- they fall back to the overall bounding
-    box only, same as before. Check unit.has_real_rooms before relying
-    on unit.rooms.
+ALL TEN unit types now have real per-room bounding boxes -- Studio_A,
+Studio_B, 1Bed_A, 1Bed_B, 2Bed_A, 2Bed_B, 3Bed_A, 3Bed_B, 4Bed_A,
+4Bed_B. Every one loads from the JSON bundled in unit_exports/ and has
+unit.rooms populated.
+
+(This docstring used to say 3Bed/4Bed had no per-room exports. That was
+already false; it just never got updated. The _RAW table below is a
+fallback that nothing currently uses, kept for a unit type added without
+an export. unit.has_real_rooms is still the honest thing to check before
+relying on unit.rooms.)
 
 Drop new exports into unit_exports/ and they load automatically at
 import time, overriding the placeholder for that unit name -- no code
-changes needed to add real data for 3Bed/4Bed once you export them.
+changes needed.
 """
 
 from __future__ import annotations

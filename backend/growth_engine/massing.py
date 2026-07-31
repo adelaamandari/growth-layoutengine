@@ -63,8 +63,9 @@ def generate_room_massing(plan: FloorPlan, base_z: float = 0.0) -> list[MassingB
     has real per-room geometry (unit.has_real_rooms), emit one block per
     ROOM instead of one block for the whole unit.
 
-    Units without real room data (3Bed/4Bed, until exported) fall back
-    to a single box, same as generate_massing().
+    All ten catalog types currently have real room data, so this path
+    is taken for every placed unit. A unit type added without an export
+    would fall back to a single box, same as generate_massing().
 
     Room-local coordinates are mapped into world space using the unit's
     actual placed corners: c1 (edge_start) is the local origin, the

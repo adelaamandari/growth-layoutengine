@@ -2,7 +2,7 @@
 growth.py
 Entrance -> corridor -> core -> branching corridors -> rooms.
 
-Corridor width is fixed at 1700cm throughout (per Adela's rule -- not
+Corridor width is fixed at 170cm throughout (per Adela's rule -- not
 derived from the room catalog). Residential units use their REAL
 footprint from catalog.py (width_cm along the corridor frontage,
 depth_cm extending outward), so different unit types genuinely occupy
@@ -12,6 +12,11 @@ Communal spaces (SK, SL, etc.) remain flexible-sized single rooms.
 Overlap is checked with geometry.polygons_overlap, which tolerates
 flush-touching edges -- this is what makes units attach directly to
 the corridor wall without a false collision.
+
+Walls are NOT built per element. Once every element is placed,
+walls.resolve_walls() turns the whole set of element edges into the
+physical walls, each built once and referenced by the elements that sit
+on it -- see walls.py.
 """
 
 from __future__ import annotations
