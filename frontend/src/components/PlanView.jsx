@@ -31,7 +31,10 @@ export default function PlanView({ plan, layers }) {
   // Keep labels and node markers a constant size on screen as we zoom.
   const zoom = view && home ? view.w / home.w : 1;
 
-  const shared = plan?.shared_segments ?? [];
+  const shared = useMemo(
+    () => (plan?.walls ?? []).filter((w) => w.shared && w.segments.length > 0),
+    [plan]
+  );
 
   function onWheel(e) {
     if (!view || !home) return;
@@ -116,31 +119,39 @@ export default function PlanView({ plan, layers }) {
           ))
         )}
 
-        {layers.shared && shared.map((s, i) => (
+        {/* Shared walls are now a resolved fact rather than a defect:
+            these are the walls carrying two owners, built once. */}
+        {layers.shared && shared.map((w) => (
           <line
-            key={`s${i}`}
-            x1={s.p[0]} y1={-s.p[1]} x2={s.p[2]} y2={-s.p[3]}
-            stroke="var(--dup)" strokeWidth="7" strokeOpacity="0.55"
+            key={`s${w.id}`}
+            x1={w.segments[0].p[0]} y1={-w.segments[0].p[1]}
+            x2={w.segments[w.segments.length - 1].p[2]}
+            y2={-w.segments[w.segments.length - 1].p[3]}
+            stroke="var(--shared)" strokeWidth="7" strokeOpacity="0.5"
             strokeLinecap="round" vectorEffect="non-scaling-stroke"
-          />
+          >
+            <title>{w.owner_labels.join(" ↔ ")} · {(w.length_cm / 100).toFixed(2)} m, built once</title>
+          </line>
         ))}
 
-        {layers.walls && plan.elements.flatMap((el, i) =>
-          el.walls.filter((w) => w.c !== "N").map((w, j) => (
+        {/* Walls come from plan.walls, not per element -- a shared wall
+            is stroked once here because it exists once. */}
+        {layers.walls && plan.walls.flatMap((w) =>
+          w.segments.filter((s) => s.c !== "N").map((s, j) => (
             <line
-              key={`w${i}-${j}`}
-              x1={w.p[0]} y1={-w.p[1]} x2={w.p[2]} y2={-w.p[3]}
-              stroke={COMPONENT_VAR[w.c]} strokeWidth="2.5"
+              key={`w${w.id}-${j}`}
+              x1={s.p[0]} y1={-s.p[1]} x2={s.p[2]} y2={-s.p[3]}
+              stroke={COMPONENT_VAR[s.c]} strokeWidth="2.5"
               strokeLinecap="round" vectorEffect="non-scaling-stroke"
             />
           ))
         )}
 
-        {layers.nodes && plan.elements.flatMap((el, i) =>
-          el.walls.filter((w) => w.c === "N").map((w, j) => (
+        {layers.nodes && plan.walls.flatMap((w) =>
+          w.segments.filter((s) => s.c === "N").map((s, j) => (
             <circle
-              key={`n${i}-${j}`}
-              cx={(w.p[0] + w.p[2]) / 2} cy={-(w.p[1] + w.p[3]) / 2}
+              key={`n${w.id}-${j}`}
+              cx={(s.p[0] + s.p[2]) / 2} cy={-(s.p[1] + s.p[3]) / 2}
               r={26 * zoom}
               fill="var(--node-fill)" stroke="var(--node-line)"
               strokeWidth="1.4" vectorEffect="non-scaling-stroke"
@@ -178,7 +189,12 @@ export default function PlanView({ plan, layers }) {
           <span className="k">kind</span> {tip.el.kind}<br />
           <span className="k">size</span> {fmt(tip.w / 100)} × {fmt(tip.d / 100)} m<br />
           <span className="k">area</span> {fmt((tip.w * tip.d) / 10000)} m²<br />
-          <span className="k">height</span> {fmt(tip.el.height_cm / 100)} m
+          <span className="k">height</span> {fmt(tip.el.height_cm / 100)} m<br />
+          <span className="k">walls</span> {tip.el.wall_ids.length}
+          {(() => {
+            const sh = tip.el.wall_ids.filter((id) => plan.walls[id]?.shared).length;
+            return sh > 0 ? ` (${sh} shared)` : "";
+          })()}
           {tip.el.rooms.length > 0 && (
             <><br /><span className="k">rooms</span> {tip.el.rooms.map((r) => r.name).join(", ")}</>
           )}

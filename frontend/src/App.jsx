@@ -57,13 +57,15 @@ export default function App() {
 
   // Component census, walked client-side from the wall segments the API
   // already returns -- same 50:80:100:80 ratios as components.py.
+  // Counted from plan.walls, so a shared wall contributes its components
+  // once -- the census now matches what would actually be fabricated.
   const census = useMemo(() => {
     const c = { N: 0, SA: 0, SB: 0, SC: 0 };
     const len = { N: 0, SA: 0, SB: 0, SC: 0 };
-    for (const el of plan?.elements ?? []) {
-      for (const w of el.walls) {
-        c[w.c] += 1;
-        len[w.c] += Math.hypot(w.p[2] - w.p[0], w.p[3] - w.p[1]);
+    for (const w of plan?.walls ?? []) {
+      for (const s of w.segments) {
+        c[s.c] += 1;
+        len[s.c] += Math.hypot(s.p[2] - s.p[0], s.p[3] - s.p[1]);
       }
     }
     return { c, len };
@@ -161,8 +163,8 @@ export default function App() {
               <dd>{plan ? `${fmt((plan.extent_cm[2] - plan.extent_cm[0]) / 100)}×${fmt((plan.extent_cm[3] - plan.extent_cm[1]) / 100)}` : "—"}<span className="u">m</span></dd>
             </div>
             <div className="stat"><dt>Footprint</dt><dd>{s ? fmt(s.footprint_m2) : "—"}<span className="u">m²</span></dd></div>
-            <div className="stat"><dt>Wall drawn</dt><dd>{s ? fmt(s.wall_length_m) : "—"}<span className="u">m</span></dd></div>
-            <div className="stat flag"><dt>Built twice</dt><dd>{s ? fmt(s.shared_length_m) : "—"}<span className="u">m</span></dd></div>
+            <div className="stat"><dt>Wall built</dt><dd>{s ? fmt(s.wall_length_m) : "—"}<span className="u">m</span></dd></div>
+            <div className="stat"><dt>Shared</dt><dd>{s ? fmt(s.shared_wall_count) : "—"}<span className="u">of {s ? fmt(s.wall_count) : "—"}</span></dd></div>
           </dl>
 
           <div className="toolbar">
@@ -208,15 +210,24 @@ export default function App() {
             </div>
           )}
 
-          {s && s.shared_length_m > 0 && (
-            <div className="panel flagbar" style={{ marginTop: 16 }}>
-              <h2>Shared boundaries</h2>
+          {s && (
+            <div className="panel sharedbar" style={{ marginTop: 16 }}>
+              <h2>Shared walls</h2>
               <p className="note">
-                <b>{fmt(s.shared_length_m, 1)} m</b> of the {fmt(s.wall_length_m, 1)} m drawn is
-                boundary the engine builds <b>twice</b>, once from each side, across{" "}
-                <b>{s.shared_count}</b> interfaces. A material take-off would over-count by{" "}
-                <b>{fmt(s.shared_pct, 1)}%</b>. Turn on <b>shared walls</b> in the plan view to see where.
+                The plan resolves to <b>{s.wall_count}</b> physical walls totalling{" "}
+                <b>{fmt(s.wall_length_m, 1)} m</b>, of which <b>{s.shared_wall_count}</b> are
+                shared between two elements — built once, referenced by both. Walking each
+                element's own edges instead would have counted{" "}
+                <b>{fmt(s.naive_length_m, 1)} m</b>, so deduplication removes{" "}
+                <b>{fmt(s.saved_pct, 1)}%</b>. Turn on <b>shared</b> in the plan view to see them.
               </p>
+              {plan?.wall_check && (
+                <p className="note" style={{ marginTop: 8, fontSize: 11.5, color: "var(--ink-3)" }}>
+                  {plan.wall_check.deduplicated
+                    ? `verified · resolved ${fmt(plan.wall_check.resolved_length_m, 2)} m matches expected ${fmt(plan.wall_check.expected_length_m, 2)} m, no orphan walls`
+                    : `CHECK FAILED · resolved ${fmt(plan.wall_check.resolved_length_m, 2)} m vs expected ${fmt(plan.wall_check.expected_length_m, 2)} m`}
+                </p>
+              )}
             </div>
           )}
         </div>

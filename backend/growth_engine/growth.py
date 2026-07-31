@@ -19,8 +19,8 @@ from dataclasses import dataclass, field
 import random
 
 from .geometry import Point, polygons_overlap
-from .components import walk_rectangle, WallSegment
 from .catalog import UnitType, get_unit
+from .walls import Wall, resolve_walls, walls_by_owner
 
 # NOTE ON UNITS: everything in this engine is CENTIMETRES. The constants
 # below were originally transcribed straight off the drawings in MM and
@@ -51,7 +51,10 @@ class PlacedElement:
     label: str                # e.g. "1Bed_A", "SK"
     corners: list[Point]      # 4 corners, in order
     height_cm: float = 300.0  # default single floor
-    walls: list[WallSegment] = field(default_factory=list)
+    # Ids into FloorPlan.walls. Elements REFERENCE walls rather than
+    # owning them -- a wall shared with a neighbour appears in both
+    # elements' wall_ids but exists once in the plan.
+    wall_ids: list[int] = field(default_factory=list)
 
 
 @dataclass
@@ -60,6 +63,12 @@ class FloorPlan:
     entrance: Point
     core_position: Point
     unit_counts: dict[str, int]
+    # The physical walls, each built once. See walls.resolve_walls.
+    walls: list[Wall] = field(default_factory=list)
+    # Sub-MIN_WALL_CM stretches that were real but too short to build.
+    # Tracked so length accounting stays exact rather than approximate.
+    dropped_wall_cm: float = 0.0
+    dropped_wall_count: int = 0
 
 
 def _rect(p1: Point, p2: Point, p3: Point, p4: Point) -> list[Point]:
@@ -73,7 +82,7 @@ def _add_corridor(elements, occupied, seg_start: Point, seg_end: Point, directio
     c3 = seg_end + pd_.scaled(CORRIDOR_HALF)
     c4 = seg_start + pd_.scaled(CORRIDOR_HALF)
     corners = _rect(c1, c2, c3, c4)
-    elements.append(PlacedElement("corridor", "Corridor", corners, walls=walk_rectangle(*corners)))
+    elements.append(PlacedElement("corridor", "Corridor", corners))
     occupied.append(corners)
 
 
@@ -83,7 +92,7 @@ def _add_core(elements, occupied, core_pos: Point):
     c3 = Point(core_pos.x + CORE_HALF, core_pos.y + CORE_HALF)
     c4 = Point(core_pos.x - CORE_HALF, core_pos.y + CORE_HALF)
     corners = _rect(c1, c2, c3, c4)
-    elements.append(PlacedElement("core", "Core", corners, walls=walk_rectangle(*corners)))
+    elements.append(PlacedElement("core", "Core", corners))
     occupied.append(corners)
 
 
@@ -99,7 +108,6 @@ def _try_add_unit(elements, occupied, edge_start: Point, edge_end: Point,
     occupied.append(corners)
     elements.append(PlacedElement(
         "unit", unit.name, corners, height_cm=unit.height_cm,
-        walls=walk_rectangle(*corners),
     ))
     return True
 
@@ -117,7 +125,7 @@ def _try_add_communal(elements, occupied, edge_start: Point, edge_end: Point,
         if all(not polygons_overlap(corners, ex) for ex in occupied):
             occupied.append(corners)
             elements.append(PlacedElement(
-                "communal", label, corners, walls=walk_rectangle(*corners),
+                "communal", label, corners,
             ))
             return True
         shrink *= 0.68
@@ -195,4 +203,16 @@ def generate_floorplan(program: list[str], seed: int | None = None) -> FloorPlan
         if total > 0:
             _add_corridor(elements, occupied, br["start"], br["start"] + br["dir"].scaled(total), br["dir"])
 
-    return FloorPlan(elements=elements, entrance=entrance, core_position=core_pos, unit_counts=unit_counts)
+    # Walls are resolved ONCE, across every element together, rather
+    # than each element walking its own four edges. Where two elements
+    # meet, the shared stretch becomes a single wall they both reference
+    # -- see walls.resolve_walls for why this needs interval
+    # decomposition and not just duplicate removal.
+    resolution = resolve_walls(elements)
+    for el, ids in zip(elements, walls_by_owner(resolution.walls, len(elements))):
+        el.wall_ids = ids
+
+    return FloorPlan(elements=elements, entrance=entrance, core_position=core_pos,
+                     unit_counts=unit_counts, walls=resolution.walls,
+                     dropped_wall_cm=resolution.dropped_cm,
+                     dropped_wall_count=resolution.dropped_count)

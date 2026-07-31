@@ -39,9 +39,20 @@ class RoomOut(BaseModel):
     height_cm: float
 
 
-class WallOut(BaseModel):
+class SegmentOut(BaseModel):
     c: str                # "N" | "SA" | "SB" | "SC"
     p: list[float]        # [x1, y1, x2, y2]
+
+
+class WallOut(BaseModel):
+    """One PHYSICAL wall, built once. A wall on the boundary between two
+    elements is referenced by both but appears here a single time."""
+    id: int
+    owners: list[int]              # indices into `elements`
+    owner_labels: list[str]
+    shared: bool
+    length_cm: float
+    segments: list[SegmentOut]
 
 
 class ElementOut(BaseModel):
@@ -49,7 +60,7 @@ class ElementOut(BaseModel):
     label: str
     height_cm: float
     corners: list[list[float]]
-    walls: list[WallOut]
+    wall_ids: list[int]   # into PlanResponse.walls
     rooms: list[RoomOut]
 
 
@@ -64,7 +75,11 @@ class SharedSegment(BaseModel):
 
 class PlanResponse(BaseModel):
     elements: list[ElementOut]
+    walls: list[WallOut]
     shared_segments: list[SharedSegment]
+    # Report from diagnostics.verify_walls -- proves the wall set really
+    # is deduplicated rather than asking the client to trust it.
+    wall_check: dict
     entrance: list[float]
     core_position: list[float]
     unit_counts: dict[str, int]

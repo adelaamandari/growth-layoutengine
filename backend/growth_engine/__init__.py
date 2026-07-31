@@ -21,6 +21,7 @@ that's a planned next step once the growth logic itself is settled.
 from .geometry import Point, polygons_overlap, point_in_polygon
 from .catalog import UNIT_CATALOG, UnitType, RoomComponent, get_unit, load_catalog_from_dir, load_unit_from_export
 from .growth import generate_floorplan, FloorPlan, PlacedElement, CORRIDOR_WIDTH_CM, CORE_SIZE_CM
+from .walls import Wall, resolve_walls, wall_summary
 from .massing import generate_massing, generate_room_massing, massing_summary, MassingBlock
 from .export import plan_to_obj, blocks_to_obj, save_obj
 
@@ -29,6 +30,7 @@ __all__ = [
     "Point", "polygons_overlap", "point_in_polygon",
     "UNIT_CATALOG", "UnitType", "RoomComponent", "get_unit", "load_catalog_from_dir", "load_unit_from_export",
     "generate_floorplan", "FloorPlan", "PlacedElement",
+    "Wall", "resolve_walls", "wall_summary",
     "CORRIDOR_WIDTH_CM", "CORE_SIZE_CM",
     "generate_massing", "generate_room_massing", "massing_summary", "MassingBlock",
 ]

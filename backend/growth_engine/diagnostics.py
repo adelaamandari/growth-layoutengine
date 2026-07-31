@@ -92,10 +92,50 @@ def shared_boundaries(elements: list[PlacedElement]) -> tuple[float, list[dict]]
 
 
 def wall_length(elements: list[PlacedElement]) -> float:
-    """Total length of wall the engine currently builds, in cm --
-    including anything built twice."""
+    """Total edge length summed per element, in cm -- i.e. counting a
+    shared boundary once for each side that claims it. This is the
+    NAIVE figure; compare it against the resolved walls to see what
+    deduplication recovered."""
     total = 0.0
     for el in elements:
         for a, b in element_edges(el):
             total += ((b.x - a.x) ** 2 + (b.y - a.y) ** 2) ** 0.5
     return total
+
+
+def verify_walls(plan, tol_cm: float = 1.0) -> dict:
+    """
+    Check that the resolved wall set really is deduplicated.
+
+    The invariant: total resolved wall length must equal the naive
+    per-element total minus the shared length, i.e. every shared stretch
+    is present exactly once. Returns a report rather than raising, so it
+    can be surfaced in the API and used as a regression guard.
+    """
+    naive = wall_length(plan.elements)
+    shared_len, shared_segs = shared_boundaries(plan.elements)
+    resolved = sum(w.length_cm for w in plan.walls)
+    dropped = getattr(plan, "dropped_wall_cm", 0.0)
+    expected = naive - shared_len
+
+    referenced = set()
+    for el in plan.elements:
+        referenced |= set(el.wall_ids)
+    all_ids = {w.id for w in plan.walls}
+
+    return {
+        "naive_length_m": round(naive / 100, 2),
+        "shared_length_m": round(shared_len / 100, 2),
+        "resolved_length_m": round(resolved / 100, 2),
+        "expected_length_m": round(expected / 100, 2),
+        # Slivers below walls.MIN_WALL_CM are deliberately not built, so
+        # they are added back here rather than hidden in a tolerance.
+        "dropped_length_m": round(dropped / 100, 3),
+        "dropped_count": getattr(plan, "dropped_wall_count", 0),
+        "delta_m": round((resolved + dropped - expected) / 100, 4),
+        "deduplicated": abs(resolved + dropped - expected) <= tol_cm,
+        "shared_wall_count": sum(1 for w in plan.walls if w.shared),
+        "shared_interface_count": len(shared_segs),
+        "all_walls_referenced": referenced == all_ids,
+        "orphan_wall_ids": sorted(all_ids - referenced),
+    }

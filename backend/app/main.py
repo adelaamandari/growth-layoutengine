@@ -32,7 +32,7 @@ from growth_engine import (
 from growth_engine.growth import CORE_SIZE_CM, CORRIDOR_WIDTH_CM
 from growth_engine.preview import render_svg
 
-from growth_engine.diagnostics import shared_boundaries, wall_length
+from growth_engine.diagnostics import shared_boundaries, verify_walls, wall_length
 
 from .schemas import (
     RESIDENTIAL,
@@ -44,6 +44,7 @@ from .schemas import (
     PlanResponse,
     RoomInfo,
     RoomOut,
+    SegmentOut,
     SharedSegment,
     UnitInfo,
     WallOut,
@@ -162,13 +163,25 @@ def plan(req: PlanRequest) -> PlanResponse:
         ElementOut(
             kind=el.kind, label=el.label, height_cm=el.height_cm,
             corners=[[round(c.x, 2), round(c.y, 2)] for c in el.corners],
-            walls=[WallOut(c=w.component,
-                           p=[round(w.start.x, 2), round(w.start.y, 2),
-                              round(w.end.x, 2), round(w.end.y, 2)])
-                   for w in el.walls],
+            wall_ids=list(el.wall_ids),
             rooms=_room_polys(el),
         )
         for el in fp.elements
+    ]
+
+    walls = [
+        WallOut(
+            id=w.id,
+            owners=list(w.owners),
+            owner_labels=[fp.elements[i].label for i in w.owners],
+            shared=w.shared,
+            length_cm=round(w.length_cm, 2),
+            segments=[SegmentOut(c=s.component,
+                                 p=[round(s.start.x, 2), round(s.start.y, 2),
+                                    round(s.end.x, 2), round(s.end.y, 2)])
+                      for s in w.segments],
+        )
+        for w in fp.walls
     ]
 
     xs = [c[0] for e in elements for c in e.corners]
@@ -185,7 +198,9 @@ def plan(req: PlanRequest) -> PlanResponse:
 
     return PlanResponse(
         elements=elements,
+        walls=walls,
         shared_segments=[SharedSegment(**s) for s in shared_segs],
+        wall_check=verify_walls(fp),
         entrance=[fp.entrance.x, fp.entrance.y],
         core_position=[fp.core_position.x, fp.core_position.y],
         unit_counts=fp.unit_counts,
@@ -194,9 +209,16 @@ def plan(req: PlanRequest) -> PlanResponse:
         suspect=_classify_program(req.program)[1],
         extent_cm=[min(xs), min(ys), max(xs), max(ys)],
         stats={
-            "wall_length_m": round(perim / 100, 1),
+            # What actually gets built, now that shared walls resolve to
+            # one wall each. This is the figure a take-off should use.
+            "wall_length_m": round(sum(w.length_cm for w in fp.walls) / 100, 1),
+            "wall_count": float(len(fp.walls)),
+            "shared_wall_count": float(sum(1 for w in fp.walls if w.shared)),
             "shared_length_m": round(shared_len / 100, 1),
-            "shared_pct": round(100 * shared_len / (perim - shared_len), 1) if perim > shared_len else 0.0,
+            # What the same plan measured before deduplication, kept so
+            # the saving stays visible rather than silently disappearing.
+            "naive_length_m": round(perim / 100, 1),
+            "saved_pct": round(100 * shared_len / perim, 1) if perim else 0.0,
             "footprint_m2": round(footprint, 1),
             "shared_count": float(len(shared_segs)),
         },

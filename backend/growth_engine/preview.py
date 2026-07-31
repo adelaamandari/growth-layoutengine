@@ -154,10 +154,12 @@ def render_svg(plan: FloorPlan, out_width_px: float = 1700.0,
         add('</g>')
 
     # --- wall components -------------------------------------------
+    # Drawn from plan.walls, not per element: each physical wall is
+    # built once, so a shared boundary is stroked once here too.
     if show_walls:
         add('<g id="walls" stroke-linecap="round">')
-        for el in plan.elements:
-            for w in el.walls:
+        for wall in plan.walls:
+            for w in wall.segments:
                 if w.component == "N":
                     continue
                 x1, y1 = px(w.start.x, w.start.y)
@@ -168,8 +170,8 @@ def render_svg(plan: FloorPlan, out_width_px: float = 1700.0,
         add('</g>')
         # nodes on top, as markers rather than a fourth hue
         add('<g id="nodes">')
-        for el in plan.elements:
-            for w in el.walls:
+        for wall in plan.walls:
+            for w in wall.segments:
                 if w.component != "N":
                     continue
                 mx = (w.start.x + w.end.x) / 2
@@ -237,18 +239,31 @@ def plan_to_dict(plan: FloorPlan) -> dict:
         "entrance": [plan.entrance.x, plan.entrance.y],
         "core": [plan.core_position.x, plan.core_position.y],
         "unit_counts": plan.unit_counts,
+        # Walls live at plan level because each is built once and may be
+        # referenced by two elements. Elements carry wall_ids into this.
+        "walls": [
+            {
+                "id": wall.id,
+                "owners": list(wall.owners),
+                "owner_labels": [plan.elements[i].label for i in wall.owners],
+                "shared": wall.shared,
+                "length_cm": round(wall.length_cm, 1),
+                "segments": [
+                    {"c": s.component,
+                     "p": [round(s.start.x, 1), round(s.start.y, 1),
+                           round(s.end.x, 1), round(s.end.y, 1)]}
+                    for s in wall.segments
+                ],
+            }
+            for wall in plan.walls
+        ],
         "elements": [
             {
                 "kind": el.kind,
                 "label": el.label,
                 "height_cm": el.height_cm,
                 "corners": [[c.x, c.y] for c in el.corners],
-                "walls": [
-                    {"c": w.component,
-                     "p": [round(w.start.x, 1), round(w.start.y, 1),
-                           round(w.end.x, 1), round(w.end.y, 1)]}
-                    for w in el.walls
-                ],
+                "wall_ids": list(el.wall_ids),
                 "rooms": [
                     {"name": n, "poly": [[round(x, 1), round(y, 1)] for x, y in poly]}
                     for n, poly in _unit_room_polys(el)
