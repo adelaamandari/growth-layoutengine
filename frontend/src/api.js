@@ -33,6 +33,10 @@ export async function getMassing(req) {
   return (await post("/api/massing", req)).json();
 }
 
+export async function getFrame(req) {
+  return (await post("/api/frame", req)).json();
+}
+
 // Streams the file straight to the browser's downloader.
 export async function download(kind, req) {
   const res = await post(`/api/export/${kind}`, req);

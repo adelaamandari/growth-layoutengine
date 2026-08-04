@@ -30,6 +30,7 @@ from growth_engine import (
     plan_to_obj,
 )
 from growth_engine.growth import CORE_SIZE_CM, CORRIDOR_WIDTH_CM
+from growth_engine.frame import build_frame, frame_summary
 from growth_engine.preview import render_svg
 
 from growth_engine.diagnostics import shared_boundaries, verify_walls, wall_length
@@ -39,6 +40,9 @@ from .schemas import (
     BlockOut,
     CatalogResponse,
     ElementOut,
+    FrameMemberOut,
+    FrameNodeOut,
+    FrameResponse,
     MassingResponse,
     PlanRequest,
     PlanResponse,
@@ -232,8 +236,41 @@ def massing(req: PlanRequest) -> MassingResponse:
     return MassingResponse(
         blocks=[BlockOut(kind=b.kind, label=b.label,
                          base_corners=[[round(c.x, 2), round(c.y, 2)] for c in b.base_corners],
-                         z0=round(b.z0, 2), z1=round(b.z1, 2)) for b in blocks],
+                         z0=round(b.z0, 2), z1=round(b.z1, 2),
+                         element_index=b.element_index,
+                         growth_step=b.growth_step) for b in blocks],
         summary=massing_summary(blocks),
+        growth_steps=(max((b.growth_step for b in blocks), default=-1) + 1),
+    )
+
+
+@app.post("/api/frame", response_model=FrameResponse)
+def frame(req: PlanRequest) -> FrameResponse:
+    """The timber frame -- posts and beams -- ordered by parasitic
+    spread outward from the entrance. See growth_engine.frame."""
+    fp = _build_plan(req)
+    fr = build_frame(fp, joint_blocks=req.joint_blocks)
+    return FrameResponse(
+        members=[
+            FrameMemberOut(
+                kind=m.kind, component=m.component,
+                c=[round(m.cx, 1), round(m.cy, 1), round(m.cz, 1)],
+                s=[round(m.sx, 1), round(m.sy, 1), round(m.sz, 1)],
+                angle=round(m.angle, 4), growth_step=m.growth_step,
+                grow_sign=m.grow_sign,
+            )
+            for m in fr.members
+        ],
+        nodes=[
+            FrameNodeOut(id=n.id, x=round(n.x, 1), y=round(n.y, 1),
+                         height_cm=round(n.height_cm, 1),
+                         wall_count=n.wall_count, is_junction=n.is_junction,
+                         depth=n.depth)
+            for n in fr.nodes
+        ],
+        growth_steps=fr.growth_steps,
+        step_labels=fr.step_labels,
+        summary=frame_summary(fr),
     )
 
 

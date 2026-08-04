@@ -200,8 +200,8 @@ frontend/                React + Vite viewer
 - **`catalog.py`** — `UnitType` and `RoomComponent` dataclasses,
   `load_unit_from_export()` parses Rhino JSON into real room geometry,
   `UNIT_CATALOG` auto-loads bundled exports from `unit_exports/` at import
-  time. *Its module docstring still claims 3Bed/4Bed lack per-room exports —
-  that is stale, all 10 types have real rooms.*
+  time. All 10 types have real rooms. (Its module docstring used to deny
+  this; corrected 2026-07-31, and it now says so explicitly.)
 - **`growth.py`** — `generate_floorplan(program, seed)` runs the full
   entrance→corridor→core→branch→room growth, returns a `FloorPlan` with
   `elements` (corridor/core/unit/communal `PlacedElement`s) and `walls`.

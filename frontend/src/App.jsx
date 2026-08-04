@@ -1,11 +1,12 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react";
-import { download, getCatalog, getMassing, getPlan } from "./api";
+import { download, getCatalog, getFrame, getMassing, getPlan } from "./api";
 import PlanView from "./components/PlanView";
 import ProgramEditor from "./components/ProgramEditor";
 
-// three.js is ~600kB and only the massing tab needs it, so it loads on
+// three.js is ~600kB and only the 3D tabs need it, so both load on
 // first use rather than blocking the plan view.
 const MassingView = lazy(() => import("./components/MassingView"));
+const FrameView = lazy(() => import("./components/FrameView"));
 
 const DEFAULT_PROGRAM = [
   "Studio_A", "Studio_B", "1Bed_A", "1Bed_B", "SK", "2Bed_A",
@@ -24,7 +25,10 @@ export default function App() {
   const [seed, setSeed] = useState(42);
   const [plan, setPlan] = useState(null);
   const [massing, setMassing] = useState(null);
+  const [frame, setFrame] = useState(null);
   const [perRoom, setPerRoom] = useState(true);
+  const [animateGrowth, setAnimateGrowth] = useState(true);
+  const [jointBlocks, setJointBlocks] = useState(false);
   const [tab, setTab] = useState("plan");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
@@ -43,15 +47,18 @@ export default function App() {
     setError(null);
     try {
       const req = { program, seed, per_room: perRoom };
-      const [p, m] = await Promise.all([getPlan(req), getMassing(req)]);
+      const [p, m, f] = await Promise.all([
+        getPlan(req), getMassing(req), getFrame({ ...req, joint_blocks: jointBlocks }),
+      ]);
       setPlan(p);
       setMassing(m);
+      setFrame(f);
     } catch (e) {
       setError(e.message);
     } finally {
       setBusy(false);
     }
-  }, [program, seed, perRoom]);
+  }, [program, seed, perRoom, jointBlocks]);
 
   useEffect(() => { if (catalog) regenerate(); }, [catalog, regenerate]);
 
@@ -171,6 +178,7 @@ export default function App() {
             <div className="seg" role="group" aria-label="View">
               <button onClick={() => setTab("plan")} aria-pressed={tab === "plan"}>Plan</button>
               <button onClick={() => setTab("massing")} aria-pressed={tab === "massing"}>3D massing</button>
+              <button onClick={() => setTab("frame")} aria-pressed={tab === "frame"}>Frame</button>
             </div>
 
             {tab === "plan" ? (
@@ -188,20 +196,78 @@ export default function App() {
               </div>
             ) : (
               <div className="toggles">
+                {tab === "massing" && (
+                  <label>
+                    <input type="checkbox" checked={perRoom} onChange={(e) => setPerRoom(e.target.checked)} />
+                    per-room massing
+                  </label>
+                )}
                 <label>
-                  <input type="checkbox" checked={perRoom} onChange={(e) => setPerRoom(e.target.checked)} />
-                  per-room massing
+                  <input type="checkbox" checked={animateGrowth} onChange={(e) => setAnimateGrowth(e.target.checked)} />
+                  animate growth
                 </label>
+                {tab === "frame" && (
+                  <label>
+                    <input type="checkbox" checked={jointBlocks} onChange={(e) => setJointBlocks(e.target.checked)} />
+                    full joint block
+                  </label>
+                )}
               </div>
             )}
           </div>
 
-          {tab === "plan" ? (
-            <PlanView plan={plan} layers={layers} />
-          ) : (
+          {tab === "plan" && <PlanView plan={plan} layers={layers} />}
+          {tab !== "plan" && (
             <Suspense fallback={<div className="viewport" style={{ padding: 20 }}><span className="muted">Loading 3D view…</span></div>}>
-              <MassingView massing={massing} />
+              {tab === "massing"
+                ? <MassingView massing={massing} animate={animateGrowth} />
+                : <FrameView frame={frame} animate={animateGrowth} />}
             </Suspense>
+          )}
+
+          {tab === "frame" && frame && (
+            <div className="panel" style={{ marginTop: 16 }}>
+              <h2>Timber frame</h2>
+              <p className="note">
+                <b>{frame.summary.member_count}</b> members — <b>{frame.summary.post_count}</b> column
+                parts standing at <b>{frame.summary.node_count}</b> structural nodes,{" "}
+                <b>{frame.summary.beam_count}</b> beams spanning between them, and{" "}
+                <b>{frame.summary.plate_count}</b> connector plates.{" "}
+                <b>{frame.summary.junction_count}</b> of those nodes are capitals, where three or
+                more walls arrive.
+              </p>
+              <p className="note" style={{ marginTop: 8, fontSize: 11.5, color: "var(--ink-3)" }}>
+                {frame.summary.real_components
+                  ? <>Sections are surveyed, read from <b>{frame.summary.source}</b>: 10×10 posts on
+                      30 cm centres, 20×10 beams, a 60×60 connector plate. Growth is topological,
+                      not program order — it spreads breadth-first from the entrance across{" "}
+                      {frame.summary.max_depth + 1} rings of nodes.</>
+                  : <>Drawing placeholder sections — run{" "}
+                      <code>python -m growth_engine.glb_import components.glb</code> to load the
+                      surveyed catalog.</>}
+              </p>
+
+              {frame.summary.length_deviation?.sample > 0 && (
+                <p className="note flagbar" style={{ marginTop: 12 }}>
+                  <b>Members do not match the catalog.</b> The surveyed parts are fixed lengths
+                  (SA 70, SB 80, SC 60 cm) but <code>components.py</code> rescales the sequence to
+                  each wall, so drawn members land a median{" "}
+                  <b>{frame.summary.length_deviation.median_cm} cm</b> from the nearest real
+                  length — only <b>{frame.summary.length_deviation.within_5cm_pct}%</b> are within
+                  5 cm, worst case {frame.summary.length_deviation.max_cm} cm. Fixing that means
+                  changing how walls resolve, not just how they draw.
+                </p>
+              )}
+
+              {frame.summary.joint_overlaps > 0 && (
+                <p className="note warnbar" style={{ marginTop: 10 }}>
+                  The full joint block is 240×240 cm, but{" "}
+                  <b>{frame.summary.joint_overlaps}</b> of {frame.summary.junction_count} capitals
+                  sit closer than that to a neighbour, so it self-intersects there. The 40×40 column
+                  and 60×60 plate fit at every node. Turn on <b>full joint block</b> to see it anyway.
+                </p>
+              )}
+            </div>
           )}
 
           {plan?.missing?.length > 0 && (

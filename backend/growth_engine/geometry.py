@@ -88,8 +88,10 @@ def polygons_overlap(a: Sequence[Point], b: Sequence[Point]) -> bool:
 
 
 def point_in_polygon(p: Point, poly: Sequence[Point]) -> bool:
-    """Standard ray-casting test. Kept for when a site boundary is
-    reintroduced -- not currently used by growth.py."""
+    """Standard ray-casting test. Used by site/analysis.py to decide which
+    grid cells fall inside a site boundary. NOT used by growth.py -- growth
+    is still unconstrained in extent, and this is the test a reintroduced
+    site boundary would be built on."""
     inside = False
     n = len(poly)
     for i in range(n):

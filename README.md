@@ -104,9 +104,16 @@ If you add a hand-typed dimension, it is in **cm**.
 ## Status
 
 Proof of concept, and honest about it. Placement, real unit geometry, massing,
-and export work. Not yet wired in: the adjacency matrix beyond a single rule, a
-site boundary constraint on growth, and shared-wall deduplication — the engine
-currently builds each shared boundary twice, once from each side, which the plan
-view will show you if you turn on the *shared walls* layer. See
+and export work. Shared walls now resolve properly — each physical wall is built
+once and referenced by both elements on it, which on the default program takes
+550.3 m of drawn wall down to 379.0 m across 59 walls, 28 of them shared. Turn on
+the *shared walls* layer in the plan view to see them, and note that
+`/api/plan` returns a `wall_check` verifying the deduplication on every response.
+
+Not yet wired in: the adjacency matrix beyond a single rule, and a site boundary
+constraint on growth (`site/` already computes the daylight/circulation field
+such a constraint would need — only the wiring into `growth.py` is missing).
+There is also no fabrication-length step yet: OBJ export writes full-precision
+metres, which is not the same as a real-world cut length. See
 [PROJECT_SUMMARY.md](PROJECT_SUMMARY.md) for the full list and the reasoning
 behind each.

@@ -5,8 +5,9 @@ per placed element, using its real height (single-floor rooms get one
 storey, 3Bed/4Bed duplex units get their full two-storey height).
 
 This is intentionally just a volumetric massing step: box geometry
-only, no roof, no per-floor slab detail. OBJ/other file export is a
-later step once the engine's logic is settled.
+only, no roof, no per-floor slab detail. Serialising these blocks to a
+file is export.py's job -- blocks_to_obj() takes the output of either
+function below.
 """
 
 from __future__ import annotations
@@ -21,11 +22,16 @@ DEFAULT_FLOOR_HEIGHT_CM = 300.0
 
 @dataclass
 class MassingBlock:
-    kind: str            # "corridor" | "core" | "unit" | "communal"
+    kind: str            # "corridor" | "core" | "unit" | "communal" | "room"
     label: str
     base_corners: list[Point]  # 4 corners at z0
     z0: float
     z1: float
+    # Which PlacedElement this came from, and where that element sits in
+    # the growth sequence. A room block inherits both from its parent
+    # unit, so every room of one unit shares a step and grows together.
+    element_index: int = 0
+    growth_step: int = 0
 
     @property
     def height_cm(self) -> float:
@@ -45,7 +51,7 @@ def generate_massing(plan: FloorPlan, base_z: float = 0.0) -> list[MassingBlock]
     communal room). Use generate_room_massing() instead if you want real
     interior room breakdown for units that have it."""
     blocks = []
-    for el in plan.elements:
+    for idx, el in enumerate(plan.elements):
         height = el.height_cm if el.kind == "unit" else DEFAULT_FLOOR_HEIGHT_CM
         blocks.append(MassingBlock(
             kind=el.kind,
@@ -53,6 +59,8 @@ def generate_massing(plan: FloorPlan, base_z: float = 0.0) -> list[MassingBlock]
             base_corners=el.corners,
             z0=base_z,
             z1=base_z + height,
+            element_index=idx,
+            growth_step=el.growth_step,
         ))
     return blocks
 
@@ -75,7 +83,7 @@ def generate_room_massing(plan: FloorPlan, base_z: float = 0.0) -> list[MassingB
     built each room's coordinates relative to the unit's position_min.
     """
     blocks = []
-    for el in plan.elements:
+    for idx, el in enumerate(plan.elements):
         if el.kind == "unit":
             unit = get_unit(el.label)
             if unit.has_real_rooms:
@@ -93,12 +101,15 @@ def generate_room_massing(plan: FloorPlan, base_z: float = 0.0) -> list[MassingB
                         base_corners=[p1, p2, p3, p4],
                         z0=base_z + room.z_min,
                         z1=base_z + room.z_min + room.height_cm,
+                        element_index=idx,
+                        growth_step=el.growth_step,
                     ))
                 continue
         height = el.height_cm if el.kind == "unit" else DEFAULT_FLOOR_HEIGHT_CM
         blocks.append(MassingBlock(
             kind=el.kind, label=el.label, base_corners=el.corners,
             z0=base_z, z1=base_z + height,
+            element_index=idx, growth_step=el.growth_step,
         ))
     return blocks
 

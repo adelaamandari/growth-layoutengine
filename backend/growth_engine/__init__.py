@@ -14,8 +14,10 @@ No Rhino/Grasshopper dependency. Intended usage from Claude Code:
     )
     blocks = generate_massing(plan)
 
-Export to OBJ/Rhino geometry is intentionally NOT included yet --
-that's a planned next step once the growth logic itself is settled.
+Geometry export exists: plan_to_obj/save_obj (OBJ, metres) in export.py,
+and render_svg/save_svg plus plan_to_dict in preview.py. What is still
+missing is a fabrication-length step -- OBJ writes full-precision floats,
+which is not the same thing as a real-world cut length.
 """
 
 from .geometry import Point, polygons_overlap, point_in_polygon
@@ -23,9 +25,11 @@ from .catalog import UNIT_CATALOG, UnitType, RoomComponent, get_unit, load_catal
 from .growth import generate_floorplan, FloorPlan, PlacedElement, CORRIDOR_WIDTH_CM, CORE_SIZE_CM
 from .walls import Wall, resolve_walls, wall_summary
 from .massing import generate_massing, generate_room_massing, massing_summary, MassingBlock
+from .frame import build_frame, frame_summary, Frame, FrameMember, FrameNode
 from .export import plan_to_obj, blocks_to_obj, save_obj
 
 __all__ = [
+    "build_frame", "frame_summary", "Frame", "FrameMember", "FrameNode",
     "plan_to_obj", "blocks_to_obj", "save_obj",
     "Point", "polygons_overlap", "point_in_polygon",
     "UNIT_CATALOG", "UnitType", "RoomComponent", "get_unit", "load_catalog_from_dir", "load_unit_from_export",

@@ -137,6 +137,14 @@ button, select, input { font: inherit; }
 .viewport svg.dragging { cursor: grabbing; }
 .viewport .hint { font-family: var(--mono); font-size: 11px; color: var(--ink-3); padding: 7px 12px; border-top: 1px solid var(--hair); display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 
+/* --- growth animation readout --- */
+.growth { display: inline-flex; align-items: center; gap: 10px; }
+.growth .phase { color: var(--ink-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.growth .track { width: 88px; height: 3px; background: var(--hair); position: relative; overflow: hidden; }
+/* Width is written directly by the render loop, not by React. */
+.growth .fill { position: absolute; top: 0; bottom: 0; left: 0; width: 0; background: var(--sa); }
+.btn.mini { padding: 3px 8px; font-size: 11px; }
+
 .tip {
   position: absolute; pointer-events: none; opacity: 0; z-index: 5;
   background: var(--ink); color: var(--paper); padding: 8px 10px;

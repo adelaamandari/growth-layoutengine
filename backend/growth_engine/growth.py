@@ -60,6 +60,9 @@ class PlacedElement:
     # owning them -- a wall shared with a neighbour appears in both
     # elements' wall_ids but exists once in the plan.
     wall_ids: list[int] = field(default_factory=list)
+    # Position in the growth sequence. NOT this element's index in
+    # FloorPlan.elements -- see _assign_growth_steps for why they differ.
+    growth_step: int = 0
 
 
 @dataclass
@@ -78,6 +81,41 @@ class FloorPlan:
 
 def _rect(p1: Point, p2: Point, p3: Point, p4: Point) -> list[Point]:
     return [p1, p2, p3, p4]
+
+
+def _assign_growth_steps(elements: list[PlacedElement]) -> None:
+    """
+    Number the elements in the order the building GROWS -- entrance ->
+    corridor -> core -> branching corridors -> rooms -- which is
+    deliberately NOT their order in `elements`.
+
+    The two differ for a real reason. A branch corridor's length is
+    max(offset_l, offset_r), which is not known until every unit on that
+    branch has been placed, so branch corridors can only be APPENDED
+    after the placement loop. Structurally, though, a corridor is the
+    armature the rooms attach to and grows before them. This restores
+    the structural order for anything replaying the growth (the 3D
+    viewer animates on it). No geometry depends on it -- it is an
+    ordering annotation only, so getting it wrong cannot move a wall.
+
+    Elements sharing a step grow together: a unit's rooms all carry the
+    unit's step, so a unit rises as one thing rather than room by room.
+    """
+    corridors: list[int] = []
+    core: list[int] = []
+    rooms: list[int] = []
+    for i, el in enumerate(elements):
+        if el.kind == "corridor":
+            corridors.append(i)
+        elif el.kind == "core":
+            core.append(i)
+        else:
+            rooms.append(i)
+    # corridors[0] is the entry run by construction -- it is placed
+    # before anything else in generate_floorplan.
+    order = corridors[:1] + core + corridors[1:] + rooms
+    for step, idx in enumerate(order):
+        elements[idx].growth_step = step
 
 
 def _add_corridor(elements, occupied, seg_start: Point, seg_end: Point, direction: Point):
@@ -216,6 +254,8 @@ def generate_floorplan(program: list[str], seed: int | None = None) -> FloorPlan
     resolution = resolve_walls(elements)
     for el, ids in zip(elements, walls_by_owner(resolution.walls, len(elements))):
         el.wall_ids = ids
+
+    _assign_growth_steps(elements)
 
     return FloorPlan(elements=elements, entrance=entrance, core_position=core_pos,
                      unit_counts=unit_counts, walls=resolution.walls,

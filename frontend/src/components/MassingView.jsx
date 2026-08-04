@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 
@@ -14,9 +14,44 @@ const KIND_COLOR = {
   room: 0xdfe3dc,
 };
 
-export default function MassingView({ massing }) {
+// Growth animation timing. STEP_STRIDE is the gap between consecutive
+// growth steps STARTING; BLOCK_RISE is how long one step takes to reach
+// full height. Stride is deliberately shorter than rise so consecutive
+// steps overlap and the building reads as growing continuously, rather
+// than as a sequence of separate pops.
+const STEP_STRIDE_MS = 200;
+const BLOCK_RISE_MS = 560;
+
+const clamp01 = (t) => (t < 0 ? 0 : t > 1 ? 1 : t);
+const easeOut = (t) => 1 - (1 - t) ** 3;
+
+const prefersReducedMotion = () =>
+  window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+
+// Set one block to a growth progress of p (0 = not yet built, 1 = full
+// height). Scaling about the box centre would sink the block into the
+// ground, so position.y is lifted in step with the scale to keep its
+// underside pinned at z0 -- a building grows up from its slab.
+function applyGrowth(item, p) {
+  // Exactly 0 makes the normal matrix degenerate and three.js warns, so
+  // the floor is a hair above zero and visibility does the real hiding.
+  const s = Math.max(p, 1e-4);
+  const y = item.y0 + (item.h * p) / 2;
+  item.mesh.scale.y = s;
+  item.mesh.position.y = y;
+  item.edges.scale.y = s;
+  item.edges.position.y = y;
+  const on = p > 0.001;
+  item.mesh.visible = on;
+  item.edges.visible = on;
+}
+
+export default function MassingView({ massing, animate = true }) {
   const mountRef = useRef(null);
   const stateRef = useRef(null);
+  const animRef = useRef(null);
+  const fillRef = useRef(null);
+  const [phase, setPhase] = useState(null);
 
   // Scene, camera, renderer and controls are built once and reused --
   // rebuilding them per data change would drop the user's camera
@@ -56,6 +91,30 @@ export default function MassingView({ massing }) {
 
     let raf;
     const tick = () => {
+      const a = animRef.current;
+      if (a?.playing) {
+        const elapsed = performance.now() - a.t0;
+        for (const it of a.items) {
+          applyGrowth(it, easeOut(clamp01((elapsed - it.start) / BLOCK_RISE_MS)));
+        }
+        // The progress bar is written straight to the DOM: driving it
+        // through React state would re-render this component ~60 times
+        // a second for a purely visual readout.
+        if (fillRef.current) {
+          fillRef.current.style.width = `${clamp01(elapsed / a.total) * 100}%`;
+        }
+        const step = Math.min(a.labels.length - 1, Math.floor(elapsed / STEP_STRIDE_MS));
+        if (step !== a.lastStep) {
+          a.lastStep = step;
+          setPhase({ step, label: a.labels[step], total: a.labels.length });
+        }
+        if (elapsed >= a.total) {
+          a.playing = false;
+          for (const it of a.items) applyGrowth(it, 1);
+          if (fillRef.current) fillRef.current.style.width = "100%";
+          setPhase(null);
+        }
+      }
       controls.update();
       renderer.render(scene, camera);
       raf = requestAnimationFrame(tick);
@@ -83,6 +142,7 @@ export default function MassingView({ massing }) {
       renderer.dispose();
       if (renderer.domElement.parentNode === mount) mount.removeChild(renderer.domElement);
       stateRef.current = null;
+      animRef.current = null;
     };
   }, []);
 
@@ -101,6 +161,12 @@ export default function MassingView({ massing }) {
     const box = new THREE.Box3();
     const edgeColor = window.matchMedia?.("(prefers-color-scheme: dark)").matches ? 0x000000 : 0x6f6f6a;
 
+    const items = [];
+    // growth_step, not array order: a branch corridor is appended after
+    // the units on it (its length isn't known until they're placed) but
+    // structurally grows before them. See growth._assign_growth_steps.
+    const labels = [];
+
     for (const b of massing.blocks) {
       const xs = b.base_corners.map((c) => c[0]);
       const ys = b.base_corners.map((c) => c[1]);
@@ -115,9 +181,10 @@ export default function MassingView({ massing }) {
       });
       const mesh = new THREE.Mesh(geo, mat);
       // three.js is Y-up; the engine is Z-up, so engine y maps to -z.
+      const y0 = b.z0 * CM_TO_M;
       mesh.position.set(
         (Math.min(...xs) * CM_TO_M) + w / 2,
-        (b.z0 * CM_TO_M) + h / 2,
+        y0 + h / 2,
         -((Math.min(...ys) * CM_TO_M) + d / 2)
       );
       group.add(mesh);
@@ -129,10 +196,36 @@ export default function MassingView({ massing }) {
       edges.position.copy(mesh.position);
       group.add(edges);
 
+      // Older API responses have no growth_step; fall back to one step
+      // for everything, which just means the whole model rises at once.
+      const step = b.growth_step ?? 0;
+      items.push({ mesh, edges, y0, h, start: step * STEP_STRIDE_MS });
+      // A duplex's rooms share their unit's step, so the first label
+      // seen for a step is the thing that step actually builds.
+      if (labels[step] === undefined) labels[step] = b.label;
+
       box.expandByObject(mesh);
     }
 
+    for (let i = 0; i < labels.length; i += 1) if (labels[i] === undefined) labels[i] = "—";
+
+    const total = Math.max(1, (labels.length - 1) * STEP_STRIDE_MS + BLOCK_RISE_MS);
+    const play = animate && !prefersReducedMotion() && items.length > 0;
+    animRef.current = { items, labels, total, t0: performance.now(), playing: play, lastStep: -1 };
+
+    if (!play) {
+      for (const it of items) applyGrowth(it, 1);
+      if (fillRef.current) fillRef.current.style.width = "100%";
+      setPhase(null);
+    } else {
+      for (const it of items) applyGrowth(it, 0);
+      if (fillRef.current) fillRef.current.style.width = "0%";
+    }
+
     // Frame the model once per data change, preserving orbit angle.
+    // Deliberately framed on the FINISHED extent, computed above from
+    // full-height meshes, so the camera holds still while the building
+    // grows into it instead of chasing a moving bounding box.
     if (!box.isEmpty()) {
       const centre = box.getCenter(new THREE.Vector3());
       const size = box.getSize(new THREE.Vector3()).length();
@@ -143,14 +236,34 @@ export default function MassingView({ massing }) {
       camera.updateProjectionMatrix();
       controls.update();
     }
-  }, [massing]);
+  }, [massing, animate]);
+
+  const replay = useCallback(() => {
+    const a = animRef.current;
+    if (!a || !a.items.length) return;
+    for (const it of a.items) applyGrowth(it, 0);
+    a.t0 = performance.now();
+    a.lastStep = -1;
+    a.playing = true;
+    if (fillRef.current) fillRef.current.style.width = "0%";
+  }, []);
 
   return (
     <div className="viewport">
       <div ref={mountRef} style={{ width: "100%", height: "min(66vh, 640px)" }} />
       <div className="hint">
         <span>Drag to orbit · scroll to zoom · right-drag to pan</span>
-        <span>{massing ? `${massing.blocks.length} blocks` : "…"}</span>
+        <span className="growth">
+          <span className="phase">
+            {phase
+              ? `${String(phase.step + 1).padStart(2, "0")}/${phase.total} · ${phase.label}`
+              : massing
+                ? `${massing.blocks.length} blocks · ${massing.growth_steps ?? "—"} steps`
+                : "…"}
+          </span>
+          <span className="track" aria-hidden="true"><span className="fill" ref={fillRef} /></span>
+          <button className="btn mini" onClick={replay} disabled={!massing}>Replay growth</button>
+        </span>
       </div>
     </div>
   );

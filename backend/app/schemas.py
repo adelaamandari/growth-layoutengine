@@ -30,6 +30,10 @@ class PlanRequest(BaseModel):
     program: list[str] = Field(default_factory=lambda: list(DEFAULT_PROGRAM))
     seed: int | None = 42
     per_room: bool = True
+    # /api/frame only: place the full 240x240 woven capital at every
+    # junction. Off by default because it is wider than the spacing of
+    # most nodes -- see growth_engine.frame.
+    joint_blocks: bool = False
 
 
 class RoomOut(BaseModel):
@@ -99,11 +103,54 @@ class BlockOut(BaseModel):
     base_corners: list[list[float]]
     z0: float
     z1: float
+    element_index: int
+    # Where this block's element sits in the growth sequence -- entrance
+    # -> corridor -> core -> branch corridors -> rooms. Blocks sharing a
+    # step grow together, so a unit's rooms rise as one unit. See
+    # growth._assign_growth_steps for why this is not element_index.
+    growth_step: int
 
 
 class MassingResponse(BaseModel):
     blocks: list[BlockOut]
     summary: dict[str, dict]
+    # Number of distinct growth steps, so a client can size a timeline
+    # without scanning every block.
+    growth_steps: int
+
+
+class FrameMemberOut(BaseModel):
+    """One timber member. Centre `c` and size `s` are packed as arrays
+    rather than named fields because a frame runs to a few thousand
+    members and the field names would dominate the payload."""
+    kind: str             # "post" | "beam"
+    component: str        # "N" | "SA" | "SB" | "SC"
+    c: list[float]        # centre [x, y, z], cm
+    s: list[float]        # size [length, width, depth], cm
+    angle: float          # radians about the vertical axis
+    growth_step: int
+    grow_sign: int
+
+
+class FrameNodeOut(BaseModel):
+    id: int
+    x: float
+    y: float
+    height_cm: float
+    wall_count: int
+    # True where 3+ walls meet -- a T or a cross, the splayed capital.
+    is_junction: bool
+    depth: int            # BFS distance from the entrance node
+
+
+class FrameResponse(BaseModel):
+    members: list[FrameMemberOut]
+    nodes: list[FrameNodeOut]
+    # Growth here is TOPOLOGICAL, not program order: posts rise at BFS
+    # depth d on step 2d, beams reach out from them on step 2d+1.
+    growth_steps: int
+    step_labels: list[str]
+    summary: dict
 
 
 class RoomInfo(BaseModel):

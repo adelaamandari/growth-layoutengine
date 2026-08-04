@@ -27,6 +27,12 @@ dist/
 .DS_Store
 Thumbs.db
 
+# Source component models. The engine reads the extracted JSON in
+# growth_engine/component_exports/, not the GLB -- regenerate it with
+# `python -m growth_engine.glb_import <file>.glb`.
+*.glb
+*.gltf
+
 # Rhino / Grasshopper working files
 *.3dm
 *.3dmbak
