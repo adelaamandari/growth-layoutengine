@@ -34,6 +34,11 @@ class PlanRequest(BaseModel):
     # junction. Off by default because it is wider than the spacing of
     # most nodes -- see growth_engine.frame.
     joint_blocks: bool = False
+    # /api/frame only: vertical pitch of the beam courses filling each
+    # wall. None means one course per storey, i.e. the ceiling beam
+    # alone -- the frame as the Frame view has always drawn it. The
+    # Build view asks for a finer pitch to fill the massing envelope.
+    course_cm: float | None = None
 
 
 class RoomOut(BaseModel):
@@ -56,6 +61,9 @@ class WallOut(BaseModel):
     owner_labels: list[str]
     shared: bool
     length_cm: float
+    # Which storey it stands on. Walls resolve per level, so a wall
+    # above another is a different wall, not the same one seen twice.
+    level: int
     segments: list[SegmentOut]
 
 
@@ -66,6 +74,10 @@ class ElementOut(BaseModel):
     corners: list[list[float]]
     wall_ids: list[int]   # into PlanResponse.walls
     rooms: list[RoomOut]
+    # Storey index, 0 = ground, and the height of its floor slab. A
+    # duplex is listed once, at its lower level, and is 600cm tall.
+    level: int = 0
+    z0: float = 0.0
 
 
 class SharedSegment(BaseModel):
@@ -94,6 +106,8 @@ class PlanResponse(BaseModel):
     communal: list[str]
     suspect: list[str]
     extent_cm: list[float]
+    # How many storeys the program needed. The plan view filters on it.
+    level_count: int = 1
     stats: dict[str, float]
 
 

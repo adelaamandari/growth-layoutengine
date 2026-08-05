@@ -30,7 +30,7 @@ from growth_engine import (
     plan_to_obj,
 )
 from growth_engine.growth import CORE_SIZE_CM, CORRIDOR_WIDTH_CM
-from growth_engine.frame import build_frame, frame_summary
+from growth_engine.frame import STOREY_CM, build_frame, frame_summary
 from growth_engine.preview import render_svg
 
 from growth_engine.diagnostics import shared_boundaries, verify_walls, wall_length
@@ -169,6 +169,7 @@ def plan(req: PlanRequest) -> PlanResponse:
             corners=[[round(c.x, 2), round(c.y, 2)] for c in el.corners],
             wall_ids=list(el.wall_ids),
             rooms=_room_polys(el),
+            level=el.level, z0=el.z0,
         )
         for el in fp.elements
     ]
@@ -180,6 +181,9 @@ def plan(req: PlanRequest) -> PlanResponse:
             owner_labels=[fp.elements[i].label for i in w.owners],
             shared=w.shared,
             length_cm=round(w.length_cm, 2),
+            # Walls are resolved per storey, so every owner of a wall is
+            # on the same level by construction.
+            level=fp.elements[w.owners[0]].level if w.owners else 0,
             segments=[SegmentOut(c=s.component,
                                  p=[round(s.start.x, 2), round(s.start.y, 2),
                                     round(s.end.x, 2), round(s.end.y, 2)])
@@ -194,11 +198,19 @@ def plan(req: PlanRequest) -> PlanResponse:
     perim = wall_length(fp.elements)
     shared_len, shared_segs = shared_boundaries(fp.elements)
 
+    # Footprint is what the building covers on the GROUND; floor area is
+    # every storey added up. They were the same number until the plan
+    # started stacking, and conflating them would make a compact scheme
+    # look like it lost area.
     footprint = 0.0
+    floor_area = 0.0
     for e in elements:
         ex = [c[0] for c in e.corners]
         ey = [c[1] for c in e.corners]
-        footprint += (max(ex) - min(ex)) * (max(ey) - min(ey)) / 10000
+        area = (max(ex) - min(ex)) * (max(ey) - min(ey)) / 10000
+        floor_area += area
+        if e.level == 0:
+            footprint += area
 
     return PlanResponse(
         elements=elements,
@@ -212,6 +224,7 @@ def plan(req: PlanRequest) -> PlanResponse:
         communal=_classify_program(req.program)[0],
         suspect=_classify_program(req.program)[1],
         extent_cm=[min(xs), min(ys), max(xs), max(ys)],
+        level_count=fp.level_count,
         stats={
             # What actually gets built, now that shared walls resolve to
             # one wall each. This is the figure a take-off should use.
@@ -224,6 +237,8 @@ def plan(req: PlanRequest) -> PlanResponse:
             "naive_length_m": round(perim / 100, 1),
             "saved_pct": round(100 * shared_len / perim, 1) if perim else 0.0,
             "footprint_m2": round(footprint, 1),
+            "floor_area_m2": round(floor_area, 1),
+            "level_count": float(fp.level_count),
             "shared_count": float(len(shared_segs)),
         },
     )
@@ -249,7 +264,8 @@ def frame(req: PlanRequest) -> FrameResponse:
     """The timber frame -- posts and beams -- ordered by parasitic
     spread outward from the entrance. See growth_engine.frame."""
     fp = _build_plan(req)
-    fr = build_frame(fp, joint_blocks=req.joint_blocks)
+    fr = build_frame(fp, joint_blocks=req.joint_blocks,
+                     course_cm=req.course_cm or STOREY_CM)
     return FrameResponse(
         members=[
             FrameMemberOut(

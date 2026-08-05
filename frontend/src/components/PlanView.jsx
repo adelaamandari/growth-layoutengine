@@ -10,12 +10,40 @@ const COMPONENT_VAR = { SA: "var(--sa)", SB: "var(--sb)", SC: "var(--sc)" };
 const fmt = (v, d = 1) =>
   v.toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
 
-export default function PlanView({ plan, layers }) {
+// How many storeys an element occupies. A duplex is 600cm and so shows
+// on two plans: solid on the level it is entered from, ghosted on the
+// one above, the way a maisonette's upper part is drawn.
+const floorsOf = (el) => Math.max(1, Math.round((el.height_cm ?? 300) / 300));
+
+export default function PlanView({ plan, layers, level = 0 }) {
   const svgRef = useRef(null);
   const wrapRef = useRef(null);
   const [tip, setTip] = useState(null);
   const [view, setView] = useState(null);
   const drag = useRef(null);
+
+  // The plan now stacks, so one storey is drawn at a time. `above` is
+  // the upper half of duplexes reaching into this level; `below` is the
+  // storey underneath, kept faint for judging how the stack lines up.
+  const here = useMemo(
+    () => (plan?.elements ?? []).filter((el) => (el.level ?? 0) === level),
+    [plan, level]
+  );
+  const above = useMemo(
+    () => (plan?.elements ?? []).filter((el) => {
+      const l = el.level ?? 0;
+      return l < level && level < l + floorsOf(el);
+    }),
+    [plan, level]
+  );
+  const below = useMemo(
+    () => (plan?.elements ?? []).filter((el) => (el.level ?? 0) === level - 1),
+    [plan, level]
+  );
+  const wallsHere = useMemo(
+    () => (plan?.walls ?? []).filter((w) => (w.level ?? 0) === level),
+    [plan, level]
+  );
 
   // World bounds -> initial viewBox. SVG y grows downward, so every
   // y is negated on the way out and north stays up.
@@ -32,8 +60,8 @@ export default function PlanView({ plan, layers }) {
   const zoom = view && home ? view.w / home.w : 1;
 
   const shared = useMemo(
-    () => (plan?.walls ?? []).filter((w) => w.shared && w.segments.length > 0),
-    [plan]
+    () => wallsHere.filter((w) => w.shared && w.segments.length > 0),
+    [wallsHere]
   );
 
   function onWheel(e) {
@@ -94,7 +122,19 @@ export default function PlanView({ plan, layers }) {
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
       >
-        {layers.fills && plan.elements.map((el, i) => (
+        {/* The storey below, faint -- drawn first so everything on this
+            level reads over it. */}
+        {layers.below && below.map((el, i) => (
+          <polygon
+            key={`b${i}`}
+            points={el.corners.map((c) => `${c[0]},${-c[1]}`).join(" ")}
+            fill="none" stroke="var(--rule)" strokeWidth="1"
+            strokeOpacity="0.35" strokeDasharray="2 6"
+            vectorEffect="non-scaling-stroke"
+          />
+        ))}
+
+        {layers.fills && here.map((el, i) => (
           <polygon
             key={`f${i}`}
             points={el.corners.map((c) => `${c[0]},${-c[1]}`).join(" ")}
@@ -105,7 +145,20 @@ export default function PlanView({ plan, layers }) {
           />
         ))}
 
-        {layers.rooms && plan.elements.flatMap((el, i) =>
+        {/* Upper half of a duplex entered from the level below. */}
+        {layers.fills && above.map((el, i) => (
+          <polygon
+            key={`a${i}`}
+            points={el.corners.map((c) => `${c[0]},${-c[1]}`).join(" ")}
+            fill={`var(--fill-${el.kind})`} fillOpacity="0.4"
+            stroke="var(--rule)" strokeWidth="1" strokeDasharray="6 4"
+            vectorEffect="non-scaling-stroke"
+          >
+            <title>{el.label} — upper floor, entered from level {el.level}</title>
+          </polygon>
+        ))}
+
+        {layers.rooms && here.flatMap((el, i) =>
           el.rooms.map((r, j) => (
             <polygon
               key={`r${i}-${j}`}
@@ -136,7 +189,7 @@ export default function PlanView({ plan, layers }) {
 
         {/* Walls come from plan.walls, not per element -- a shared wall
             is stroked once here because it exists once. */}
-        {layers.walls && plan.walls.flatMap((w) =>
+        {layers.walls && wallsHere.flatMap((w) =>
           w.segments.filter((s) => s.c !== "N").map((s, j) => (
             <line
               key={`w${w.id}-${j}`}
@@ -147,7 +200,7 @@ export default function PlanView({ plan, layers }) {
           ))
         )}
 
-        {layers.nodes && plan.walls.flatMap((w) =>
+        {layers.nodes && wallsHere.flatMap((w) =>
           w.segments.filter((s) => s.c === "N").map((s, j) => (
             <circle
               key={`n${w.id}-${j}`}
@@ -159,7 +212,7 @@ export default function PlanView({ plan, layers }) {
           ))
         )}
 
-        {layers.labels && plan.elements.map((el, i) => {
+        {layers.labels && here.map((el, i) => {
           const cx = el.corners.reduce((s, c) => s + c[0], 0) / 4;
           const cy = el.corners.reduce((s, c) => s + c[1], 0) / 4;
           return (
@@ -172,7 +225,7 @@ export default function PlanView({ plan, layers }) {
         })}
 
         {/* hit layer last so it captures the pointer everywhere */}
-        {plan.elements.map((el, i) => (
+        {here.map((el, i) => (
           <polygon
             key={`h${i}`}
             points={el.corners.map((c) => `${c[0]},${-c[1]}`).join(" ")}
@@ -189,7 +242,9 @@ export default function PlanView({ plan, layers }) {
           <span className="k">kind</span> {tip.el.kind}<br />
           <span className="k">size</span> {fmt(tip.w / 100)} × {fmt(tip.d / 100)} m<br />
           <span className="k">area</span> {fmt((tip.w * tip.d) / 10000)} m²<br />
-          <span className="k">height</span> {fmt(tip.el.height_cm / 100)} m<br />
+          <span className="k">height</span> {fmt(tip.el.height_cm / 100)} m
+          {floorsOf(tip.el) > 1 ? ` (${floorsOf(tip.el)} storeys)` : ""}<br />
+          <span className="k">level</span> {tip.el.level ?? 0}<br />
           <span className="k">walls</span> {tip.el.wall_ids.length}
           {(() => {
             const sh = tip.el.wall_ids.filter((id) => plan.walls[id]?.shared).length;

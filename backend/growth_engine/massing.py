@@ -53,12 +53,16 @@ def generate_massing(plan: FloorPlan, base_z: float = 0.0) -> list[MassingBlock]
     blocks = []
     for idx, el in enumerate(plan.elements):
         height = el.height_cm if el.kind == "unit" else DEFAULT_FLOOR_HEIGHT_CM
+        # el.z0 is the element's own storey; base_z shifts the whole
+        # building. A duplex's z0 is still its LOWER floor -- its extra
+        # height is already in height_cm.
+        z0 = base_z + el.z0
         blocks.append(MassingBlock(
             kind=el.kind,
             label=el.label,
             base_corners=el.corners,
-            z0=base_z,
-            z1=base_z + height,
+            z0=z0,
+            z1=z0 + height,
             element_index=idx,
             growth_step=el.growth_step,
         ))
@@ -90,6 +94,9 @@ def generate_room_massing(plan: FloorPlan, base_z: float = 0.0) -> list[MassingB
                 c1, c2, c3, c4 = el.corners
                 along = normalize(Point(c2.x - c1.x, c2.y - c1.y))
                 out = normalize(Point(c4.x - c1.x, c4.y - c1.y))
+                # room.z_min stacks a duplex's upper floor WITHIN the
+                # unit; el.z0 lifts the whole unit onto its storey. Both
+                # apply, and they are different things.
                 for room in unit.rooms:
                     p1 = c1 + along.scaled(room.x_min) + out.scaled(room.y_min)
                     p2 = c1 + along.scaled(room.x_max) + out.scaled(room.y_min)
@@ -99,8 +106,8 @@ def generate_room_massing(plan: FloorPlan, base_z: float = 0.0) -> list[MassingB
                         kind="room",
                         label=f"{el.label}:{room.name}",
                         base_corners=[p1, p2, p3, p4],
-                        z0=base_z + room.z_min,
-                        z1=base_z + room.z_min + room.height_cm,
+                        z0=base_z + el.z0 + room.z_min,
+                        z1=base_z + el.z0 + room.z_min + room.height_cm,
                         element_index=idx,
                         growth_step=el.growth_step,
                     ))
@@ -108,7 +115,7 @@ def generate_room_massing(plan: FloorPlan, base_z: float = 0.0) -> list[MassingB
         height = el.height_cm if el.kind == "unit" else DEFAULT_FLOOR_HEIGHT_CM
         blocks.append(MassingBlock(
             kind=el.kind, label=el.label, base_corners=el.corners,
-            z0=base_z, z1=base_z + height,
+            z0=base_z + el.z0, z1=base_z + el.z0 + height,
             element_index=idx, growth_step=el.growth_step,
         ))
     return blocks

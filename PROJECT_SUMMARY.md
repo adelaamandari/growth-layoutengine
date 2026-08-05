@@ -13,10 +13,23 @@ Rooms are not abstract graph nodes — a room is the physical space enclosed by
 built wall/beam **components**, matching the mortise-tenon timber joinery in
 Adela's renders.
 
-- **Components**: N (node/corner), SA, SB, SC (edges). A full span is a
-  symmetric, mirrored sequence: **N + SA + SB + SB + SC + SB + SB + SA + N**
-  (doubled SB flanking the centre SC — matches paired timber bracing members
-  visible in her renders).
+- **Components**: N (node), SA, SB, SC (edges). A full span is a symmetric,
+  mirrored sequence: **N + SA + SB + SC + SB + SA + N**, and a full span is
+  **360cm**, one structural bay.
+
+  > **Both numbers are surveyed, not chosen.** The Beam A assembly in
+  > `components.glb` is 359.99 × 359.99, and one of its arms runs outward from
+  > the node centre as SA (10–80), SB (60–140), SC (120–180) — each member
+  > lapping the next by exactly 20cm, one member width, reaching 180cm. Mirror
+  > that arm and you have the sequence above, node centre to node centre. The
+  > nominal lengths agree exactly: **70 + 80 + 60 + 80 + 70 = 360**, so a bay
+  > closes on real catalog parts with nothing left over.
+  >
+  > **Superseded 2026-08-05.** This previously read
+  > `N + SA + SB + SB + SC + SB + SB + SA + N` — nine parts, doubled SBs —
+  > with the sequence rescaled per wall to whatever length that wall happened
+  > to be. That produced members no joinery shop could cut twice the same
+  > (median 40cm off the nearest catalog length, only 17% within 5cm).
 - **Circulation** has a fixed half-span of **170cm** (this is architect-set,
   independent of any catalog ratio, never derived).
 
@@ -27,31 +40,30 @@ Adela's renders.
   > (unit footprints, the 300/600 storey heights) was always correct cm;
   > only the hand-typed constants were wrong, uniformly by 10×.
 
-- **Room component sizes** (N/SA/SB/SC) scale proportionally off the same
-  340cm module (2× circulation half-span) using the original ratios
-  50:80:100:80, via an exact scale factor `k`:
-  - `k = 340 / (2×50 + 2×80 + 4×100 + 80) = 340/740 ≈ 0.4595`
-  - At that scale the members land at N≈23cm, SA≈37cm, SB≈46cm, SC≈37cm.
-    **Worth checking against the joinery drawings** — these are now
-    member-scale, where the old 10× figures gave a 4.6m SB, which is
-    room-scale. If the intended reading was that a component spans a whole
-    structural bay rather than a single member, the module is what needs
-    revisiting, not the ratios.
-  - This is kept **unrounded** in formulas — rounding only happens at a
-    separate `fabrication_length_cm()` step right before real-world export,
-    never baked into the constants themselves. Baking rounding into constants
-    lets closure error compound silently across every span in a building.
+- **Room component sizes** are the catalog's own: **SA 70, SB 80, SC 60**, each
+  20 wide × 10 thick, with a 60×60×10 connector plate at N. These are read
+  straight out of `components.glb` and are no longer derived from a module or
+  a ratio — the ratio question is answered by the bay closing exactly.
 
-    > **Not yet built.** The unrounded discipline is correctly implemented —
-    > `walk_wall()` derives `k` fresh from each wall's real length and nothing
-    > is pre-rounded — but `fabrication_length_cm()` itself does not exist
-    > anywhere in the codebase. There is currently no path from the engine to
-    > a real-world cut length. `export.py` writes geometry in metres at full
-    > float precision, which is *not* the same thing as a fabrication figure.
-- Different rooms get different real sizes (not a uniform grid) by **locally
-  rescaling the same component sequence per wall** to that wall's actual
-  target length — same `k`-derivation, just computed per-wall instead of
-  globally.
+  > **The old derivation, kept for the record.** Sizes used to be scaled off a
+  > 340cm module (2× circulation half-span) with ratios 50:80:100:80 and an
+  > exact factor `k = 340/740 ≈ 0.4595`, landing at N≈23, SA≈37, SB≈46,
+  > SC≈37cm. The note here used to say those were worth checking against the
+  > joinery drawings, and that "if a component spans a whole structural bay
+  > rather than a single member, the module is what needs revisiting". That
+  > turned out to be exactly right: the bay is 360 and the members are the
+  > surveyed lengths.
+- **A wall run divides into whole 360cm bays, and only the LAST one adapts.**
+  A wall is rarely a whole number of bays, so the run is split into the
+  nearest whole number and the final bay takes up the difference — stretched
+  or shortened. Every other bay is exactly 360 and its five members are
+  exactly the catalog parts. **100% of primary grid beams and 47% of infill
+  members now come out at exact catalog length**, against a median 40cm drift
+  on every member before.
+- **Rounding** still happens nowhere in the constants. There is still no
+  `fabrication_length_cm()` anywhere in the codebase, so there is still no
+  path from the engine to a real cut length — `export.py` writes metres at
+  full float precision, which is not the same thing.
 - A **mirror pair** is the fundamental structural unit: a component and its
   mirror form a portal frame. `shared_walls` entries (e.g.
   `("Shower","Double_Room")`) mean two rooms share ONE physical built wall —
@@ -104,6 +116,27 @@ That file is *not* in this repo.
   caused overlapping reserved zones near the core that made room placement
   fail more often, and aren't architecturally sound anyway (corridors turn at
   right angles).
+- **The plan grows UP as well as out.** `max_branch_cm` (default **1200cm**)
+  caps how far a branch may run from the core. Runs fill both sides of one
+  branch before the next, so a corridor is double-loaded; when no run on the
+  level can take the next unit inside the cap, growth starts the storey above
+  instead of reaching further out. The default program went from a **60×35m**
+  single-storey sprawl to **22×20m over 4 levels** — same floor area (787 →
+  793m²), a third of the ground footprint (787 → 300m²).
+  - Each level carries its own core and branch corridors, and its own
+    occupancy. The core repeats on every storey the building passes through,
+    because it is the stair.
+  - A **duplex is 600cm and so reserves its footprint on TWO levels.** Its
+    footprints can blanket the storey above, which is why a run steps past a
+    blocked bay (`PROBE_STEP_CM`) and why growth tolerates a fully blocked
+    storey (`MAX_EMPTY_LEVELS`) rather than giving up. Without either, a
+    program of four duplexes placed four units and abandoned the other
+    fourteen.
+  - **Walls resolve per level.** A level-1 corridor stands directly above the
+    level-0 one and `resolve_walls` works in plan, so resolving them together
+    would merge two real walls into one and halve the take-off. Same reason
+    `diagnostics.shared_boundaries` only compares elements on one level.
+  - Pass a very large `max_branch_cm` for the old single-storey behaviour.
 - **Overlap checking**: proper polygon collision via **Separating Axis
   Theorem (SAT)**, tolerant of flush-touching edges within a small epsilon
   (1cm). This tolerance is critical — without it, any two components meant to
@@ -191,8 +224,9 @@ frontend/                React + Vite viewer
 - **`geometry.py`** — `Point` class, vector math, SAT polygon overlap test
   (with the flush-touching epsilon fix), `point_in_polygon` (ready but
   unused since boundary was removed).
-- **`components.py`** — the N-SA-SB-SB-SC-SB-SB-SA-N sequence, `walk_wall()`
-  rescales it per-wall to any real length exactly.
+- **`components.py`** — the N-SA-SB-SC-SB-SA-N sequence and the 360cm bay it
+  spans (`BAY_CM`, `BAY_LENGTHS`). `walk_wall()` divides a run into bays and
+  only the last one adapts; `bay_lengths()` is that division on its own.
 - **`walls.py`** — **NEW.** `resolve_walls()` turns per-element edges into the
   set of physical walls, each built once, by collinear interval decomposition.
   Returns a `WallResolution` carrying the walls plus the length of any
@@ -202,13 +236,94 @@ frontend/                React + Vite viewer
   `UNIT_CATALOG` auto-loads bundled exports from `unit_exports/` at import
   time. All 10 types have real rooms. (Its module docstring used to deny
   this; corrected 2026-07-31, and it now says so explicitly.)
-- **`growth.py`** — `generate_floorplan(program, seed)` runs the full
-  entrance→corridor→core→branch→room growth, returns a `FloorPlan` with
-  `elements` (corridor/core/unit/communal `PlacedElement`s) and `walls`.
+- **`growth.py`** — `generate_floorplan(program, seed, max_branch_cm,
+  max_levels)` runs the full entrance→corridor→core→branch→room growth, level
+  by level, and returns a `FloorPlan` with `elements`
+  (corridor/core/unit/communal `PlacedElement`s), `walls` and `level_count`.
+  Each element carries a `level`, a `z0` (its slab height) and `floors` (2 for
+  a duplex). See the growth-logic section above for how the cap decides
+  whether the plan spreads or stacks.
 - **`massing.py`** — `generate_massing()` extrudes each placed element into
   one box (coarse). `generate_room_massing()` extrudes real per-room
-  geometry when available (uses `RoomComponent.z_min` for correct floor
-  stacking), falls back to one box per unit otherwise.
+  geometry when available, falls back to one box per unit otherwise. Two
+  different vertical offsets both apply and are not the same thing:
+  `RoomComponent.z_min` stacks a duplex's upper floor WITHIN the unit, while
+  `PlacedElement.z0` lifts the whole unit onto its storey.
+- **`glb_import.py`** — **was never documented here.** Reads Adela's
+  `components.glb` into the component catalog with the standard library only:
+  GLB is a JSON chunk plus a BIN chunk, and glTF *requires* every POSITION
+  accessor to carry min/max, so per-part bounding boxes come out of the JSON
+  without decoding a single vertex. Regenerate with
+  `python -m growth_engine.glb_import path/to/components.glb`; the extracted
+  `component_exports/components.json` is committed, the 13.5MB GLB is not.
+  Surveyed result: 10×10 posts on 30cm centres in a 40×40 column bundle,
+  20×10 beam sections (SA 70, SB 80, SC 60), a 60×60×10 connector plate, and
+  a 240×240 woven capital of F1/F2 lacing and B2 verticals.
+- **`frame.py`** — `build_frame(plan)` resolves a plan into the real
+  components. There are five kinds of member and they are not the same thing:
+  `post` and `plate` (the column bundle and its connector), `beam` (a primary
+  member on a grid line), `infill` (a wall member between the bays), and
+  `floor` (a storey deck).
+  - **The grid is independent of the rooms, and no column stands outside the
+    volume.** A column stands at every intersection of the 360cm grid that
+    falls inside the massing — so some land inside rooms, and walls become
+    infill between the bays. The grid is anchored at the entrance, the growth
+    seed.
+  - **Where the massing runs past the last column, the frame reaches the
+    building line with a HALF SPAN and stops** (`STUB_CM`, half a bay,
+    clipped to the face). This replaces snapping columns to the nearest
+    gridline, which planted **1,792 post members up to 195cm out in open
+    air** with a full bay run out to each. A stub is the bay sequence
+    truncated — half a span comes out as SA + SB + half an SC, which is the
+    arm of the surveyed assembly. Stubs close exactly on the face: measured
+    max overhang 0cm.
+  - **A beam is only built where the bay it spans is in the building.** Both
+    ends being inside is not enough — two arms of a cross-shaped plan can face
+    each other across a notch, and the span between them is open air.
+  - **A column stops where it stops holding floor.** Where the building is
+    full height so is the column, but where an upper storey sets back, its
+    columns end with it instead of carrying on up holding nothing.
+    `FrameNode.levels` is the storeys at which any of the four bays meeting at
+    the node has floor in them, and the top of the highest one is where the
+    column ends — verified as 0 columns topping out above their own floor,
+    over 60 random programs, 59 of which come out with stepped column
+    heights.
+  - **A column runs unbroken from the ground** to the top of the highest level
+    above it, passing through any storey the plan does not occupy there. A
+    column with a gap in it is not a column.
+  - **A primary span is exactly one bay**, so its five members are catalog
+    parts with no scaling at all.
+  - **Every column is tied to every grid neighbour at every storey both
+    reach** — not only where the plan occupies both ends. A column rising with
+    nothing spanning to its neighbour is not braced, and the rooms happening
+    to stop short of that bay does not change the structure's problem. Tying
+    only the occupied bays left 6 of 41 adjacent pairs with a storey of
+    unconnected column on the default program. Measured over 100 random
+    programs after the fix: **0 isolated columns and 0 untied column-storeys
+    out of 10,306**.
+  - `course_cm` divides each storey into that many horizontal courses and
+    repeats the whole component walk at each one, filling the wall instead of
+    outlining it. Storeys divide a whole number of times, so the ceiling
+    course always lands on the storey line — that beam is structural and does
+    not move. The default (one course per storey) is the ceiling beam alone.
+    Intermediate courses weave ±half a member either side of the wall centre
+    line, which is what the surveyed capital's F1/F2 layers do.
+  - Growth is TOPOLOGICAL and three-dimensional, not program order. A *ring*
+    is BFS depth across the GRID from the entrance node, plus storeys climbed
+    — out and up in the same currency, so the front is a diagonal shell rather
+    than a plan that fills before it rises. Each ring builds in the order the
+    thing is assembled:
+
+        step 4r + 0   columns rise through this storey
+        step 4r + 1   primary beams span the grid lines between them
+        step 4r + 2   the floor deck lands on those beams
+        step 4r + 3   the walls infill between the bays
+  - `frame_summary()` reports provenance (surveyed vs. placeholder catalog),
+    the course pitch, and two places the source and the engine disagree:
+    `length_deviation` (the catalog is fixed-length, `components.py` rescales)
+    and `joint_overlaps` (on the default program, 15 of 28 capitals sit closer
+    to a neighbour than the 240cm joint is wide, so the full joint block
+    self-intersects there and is off by default).
 - **`preview.py`** — **NEW.** `render_svg()` / `save_svg()` draw a plan to a
   plain SVG, no matplotlib. Also `plan_to_dict()` for a web viewer. Runs as
   `python -m growth_engine.preview --seed 42 --out plan.svg`.
@@ -230,6 +345,32 @@ frontend/                React + Vite viewer
   `generate_floorplan`, `generate_massing`, `generate_room_massing`,
   `plan_to_obj`, `Wall`, `resolve_walls`, `get_unit`, `UNIT_CATALOG`,
   `Point`, `polygons_overlap`, etc.
+
+### `frontend/src/components/` — the four views
+
+All four read the same plan; they differ in what they choose to draw.
+
+- **Plan** — SVG, the component walk in 2D, with layer toggles. Draws ONE
+  storey at a time (the stepper appears once a plan stacks), with the level
+  below dashed underneath and the upper half of any duplex hatched.
+- **3D massing** — one box per element (or per room), rising in PROGRAM order:
+  entrance → corridor → core → branch corridors → rooms.
+- **Frame** — the structural frame alone: a column at every node, one beam
+  course at each storey ceiling. This is what gets built, not what it occupies.
+- **Build** — **NEW.** Both at once, on one clock. The massing rises, fades to
+  a ghost at 12% opacity (depth-write off, so the timber reads through it),
+  and then the components colonise it ring by ring until the walls are filled
+  with courses. The course pitch is selectable; 300cm falls back to the
+  ceiling beam alone, i.e. the Frame view's frame with the volume behind it.
+  It asks `/api/frame` a second time with `course_cm` — same seed, same plan,
+  so the two frames are two readings of one building.
+
+`frameInstances.js` holds what the Frame and Build views share: the whole
+frame is one `InstancedMesh` (a few thousand members would otherwise be a few
+thousand draw calls), and one `applyMembers()` writes every instance matrix
+per tick. Posts rise from their underside; beams *extend* along their own axis
+away from the column already standing, which is what makes the spread read as
+reaching outward rather than as members switching on.
 
 ## Usage
 
@@ -277,6 +418,29 @@ converts (to metres), because that is what Blender and Rhino expect.
   be worse.*
 - **Branch count is hardcoded to 3** (straight/left/right) — a real system
   might vary branch count based on program size or site geometry.
+- **The woven joint capital still projects past the massing.** With
+  `joint_blocks` on, the 240×240 assembly at an edge node throws its arms up
+  to **75cm outside the volume** — the same category of problem the columns
+  and beams have now been fixed for, but clipping it would mean drawing a
+  partial capital, which is a decision about the assembly rather than about
+  where it goes. Left alone because the joint block is still an open question.
+- **A large program's frame gets heavy.** The frame is one
+  `InstancedMesh`, so it is still a single draw call, but `applyMembers()`
+  rewrites every instance matrix each tick while the growth animation runs.
+  The default program is ~7.6k members; a 24-entry program reached **19,599**.
+  If that stutters, the fix is to stop rewriting members that have finished
+  growing, not to thin the frame.
+- **The branch cap is one number for the whole building.** `max_branch_cm`
+  applies to every run on every level, so the plan compacts uniformly rather
+  than, say, keeping a longer ground floor under a smaller upper one. A
+  setback or a per-level cap would be a real design move; this is not one yet.
+- **Nothing checks that an upper-level unit has anything under it.** Occupancy
+  is per level and a run steps past blocked bays, so a unit can land over the
+  gap where the storey below stops. Measured over 120 random programs, **24 of
+  1024 above-ground units (2.3%)** have no element directly beneath them. The
+  massing and frame both draw them happily. Rare, but real: it wants either a
+  support rule at placement or a deliberate decision that the timber frame
+  cantilevers there.
 - **Only one program list per run** — no automatic program generation from
   a target unit mix or area budget; you hand it an explicit ordered list.
 - **The seed barely does anything.** `random` is called in exactly one place,
@@ -299,6 +463,19 @@ converts (to metres), because that is what Blender and Rhino expect.
   subdivided — correct, since the communal catalog doesn't define
   sub-spaces for them, just noting it's asymmetric with residential
   treatment.
+- **Infill members in a run's last bay are still bespoke.** Primary grid beams
+  are all catalog parts, but a wall run rarely divides into whole bays, so its
+  final bay stretches or shortens — 47% of infill members come out at exact
+  catalog length and the rest land a median 10cm off (worst case 77cm).
+  `frame_summary()["length_deviation"]` measures only the infill now, because
+  averaging in the exact spans would dilute the one number that matters.
+  Closing the remainder properly means either a real closer part or snapping
+  wall lengths to the grid, which would move the surveyed unit footprints.
+- **The 240×240 joint block does not fit its own plan.** On the default
+  program, 15 of 28 capitals sit closer to a neighbour than the woven capital
+  is wide, so it self-intersects there. Off by default, counted, and
+  toggleable — but whether the answer is a smaller capital, wider bays, or
+  clipping the assembly per node is unresolved.
 
 ## Solved since the original summary
 
@@ -311,3 +488,19 @@ converts (to metres), because that is what Blender and Rhino expect.
   it was requested explicitly.
 - ~~**Uniform placeholder unit sizes.**~~ All 10 types carry real per-room
   geometry, as the original summary already recorded.
+- ~~**Columns stood wherever a wall happened to end.**~~ Resolved 2026-08-05.
+  They now stand on an independent 360cm grid and run unbroken from the
+  ground, so the structure is a vertical system rather than a per-storey
+  accident. The sequence changed with it, from nine rescaled parts to seven
+  fixed ones spanning one bay. Checked over 120 random programs: **100% of
+  primary beam members come out at exact catalog length**, every column starts
+  at ground level, nothing is drawn below it, and `verify_walls` still holds
+  at delta 0.00m.
+- ~~**There was no floor.**~~ A deck is drawn per element at its own storey
+  datum, growing in its own phase after the beams it lands on.
+- ~~**The plan only ever grew outward.**~~ Every unit ran onto the three
+  ground-floor branches, so the composition sprawled and the core served one
+  storey. `max_branch_cm` now stacks it. Checked over 200 random programs
+  (3–24 entries): all place fully, no same-level overlaps, `verify_walls`
+  delta 0.00m throughout, and the extent stays inside ~26×22m however long the
+  program gets — the building grows up instead.

@@ -115,6 +115,10 @@ button, select, input { font: inherit; }
 .toggles label { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ink-2); cursor: pointer; font-family: var(--mono); }
 .toggles input { accent-color: var(--sa); margin: 0; }
 
+/* Storey stepper. Only shown once a plan actually stacks. */
+.levels { display: inline-flex; align-items: center; gap: 2px; border: 1px solid var(--rule); padding: 1px 4px; }
+.levels .lv { font-family: var(--mono); font-size: 12px; color: var(--ink); min-width: 22px; text-align: center; font-variant-numeric: tabular-nums; }
+
 /* --- program editor --- */
 .prog-list { list-style: none; margin: 0 0 10px; padding: 0; display: flex; flex-direction: column; gap: 3px; max-height: 340px; overflow-y: auto; }
 .prog-item { display: grid; grid-template-columns: 20px 1fr auto; align-items: center; gap: 7px; font-family: var(--mono); font-size: 12px; padding: 4px 6px; border: 1px solid transparent; }

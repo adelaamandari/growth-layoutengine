@@ -79,11 +79,18 @@ def shared_boundaries(elements: list[PlacedElement]) -> tuple[float, list[dict]]
     whether the two sides were ever INTENDED as a party wall, so treat
     the total as an upper bound on recoverable duplication until it is
     checked against the joinery drawings.
+
+    Only elements on the SAME level are compared. The test works in
+    plan, so without that guard a corridor on level 1 standing directly
+    above the one on level 0 would report its whole length as shared --
+    they are two real walls, one above the other, sharing nothing.
     """
     segments: list[dict] = []
     total = 0.0
     for i, e1 in enumerate(elements):
         for e2 in elements[i + 1:]:
+            if getattr(e1, "level", 0) != getattr(e2, "level", 0):
+                continue
             for ea in element_edges(e1):
                 for eb in element_edges(e2):
                     hit = _overlap(ea, eb)
