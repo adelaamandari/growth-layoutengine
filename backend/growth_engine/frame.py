@@ -48,6 +48,14 @@ The column assembly's 38 members sit at distinct heights (25, 65,
 70.75, 115 ... 270.75), so binning them by storey makes a column rise
 band by band rather than appearing whole.
 
+PARTITIONS: THE WALLS INSIDE A UNIT
+Element walls are the envelope. The dividers BETWEEN the rooms of a
+unit come from the same surveyed room rectangles the per-room massing
+uses, resolved through the same walls.py machinery so a divider two
+rooms share is built once. They are the same catalog parts as the
+envelope, one scale down. See _partition_walls, which also explains
+why the rooms cannot simply be treated as a tiling -- they overlap.
+
 COURSES: FILLING A WALL RATHER THAN OUTLINING IT
 Wall infill is not one beam at the ceiling. `course_cm` divides each
 storey into that many horizontal courses and repeats the component walk
@@ -57,11 +65,15 @@ so the ceiling course lands exactly on the storey line. Primary grid
 beams are not coursed -- there is one at each storey line, because that
 is the structure rather than the infill.
 
-WHAT THE SOURCE AND THE ENGINE STILL DISAGREE ABOUT
-BAY SIZE OF THE CAPITAL. The woven joint assembly is 240x240, which
-fits comfortably inside a 360 grid -- but it is still off by default
-and its overlap is still counted, because nothing has confirmed it
-belongs at every node rather than only at the primary ones.
+THE CAPITAL SITS ON EVERY COLUMN
+The woven joint assembly is 240x240 and the grid is 360, so it fits at
+every node with 120 to spare -- which is why it now goes on all of
+them rather than only where three or more beams arrive. A corner
+column heads into its capital the same way a cross does; the arms with
+no beam to meet simply stop. `joint_overlaps` still measures the
+clearance so an irregular grid would report it, but on the regular
+360 grid it is zero. The block stays off by default only because the
+bare column reads more clearly while judging the plan.
 """
 
 from __future__ import annotations
@@ -71,8 +83,11 @@ from dataclasses import dataclass, field
 from math import atan2, hypot
 
 from .components import BAY_CM, BAY_LENGTHS, BAY_NAMES
+from .geometry import Point
 from .glb_import import load_catalog
 from .growth import FloorPlan
+from .massing import generate_room_massing
+from .walls import COLLINEAR_TOL_CM, resolve_walls
 
 # Two N nodes within this distance are the same physical node. Wall ends
 # meeting at a junction are computed from different elements, so they
@@ -86,6 +101,11 @@ STOREY_CM = 300.0
 # redeclaring, so the grid and the wall walk can never disagree.
 GRID_CM = BAY_CM
 
+# Slack when testing whether a course still fits under a wall's top.
+# Surveyed room heights land a few mm either side of the storey (300.3
+# is common), and a course must not be thrown away for 3mm.
+CUT_TOL_CM = 1.0
+
 # A grid point this far outside an element still counts as inside it.
 # Columns belong on the building line, and a grid point landing exactly
 # on a wall face would otherwise fall out through float noise.
@@ -93,6 +113,13 @@ GRID_TOL_CM = 1.0
 
 # The floor deck. 10cm is the thickness of every surveyed member.
 FLOOR_CM = 10.0
+
+# The ceiling soffit -- the same plate as the floor, capping a storey
+# rather than starting it. It hangs UNDER the primary beams, which
+# occupy the top 10cm of the storey (290..300), so a storey reads
+# floor / volume / ceiling / beams / next floor with nothing coplanar
+# and nothing z-fighting.
+CEILING_CM = 10.0
 
 # No column stands outside the volume. Where the massing runs past the
 # last column, the frame reaches the building line with a HALF SPAN --
@@ -138,7 +165,9 @@ class FrameMember:
     # "plate"  its 60x60 connector, one per storey
     # "beam"   a primary member spanning a grid line
     # "infill" a wall member, coursed between the bays
+    # "partition" a divider between the rooms INSIDE a unit
     # "floor"  a storey deck
+    # "ceiling" the soffit capping that same storey
     # "lacing" the woven capital, only when joint_blocks is on
     kind: str
     component: str       # catalog name, or the assembly part it came from
@@ -229,6 +258,31 @@ def _storey_of(z: float) -> int:
     return max(0, int(z // STOREY_CM))
 
 
+# How much of the storey above a slab line an element has to occupy for
+# that line to count as one of its floors. Surveyed unit heights
+# overshoot the nominal 300 storey by a few cm -- one unit in the
+# default program is 307.5 tall -- and 7.5cm of survey drift is not
+# another floor. Half a storey separates that from a real duplex, which
+# clears the line by a full 300.
+MIN_STOREY_OCCUPANCY_CM = STOREY_CM / 2
+
+
+def _spanned_storeys(z0: float, z1: float) -> list[int]:
+    """Every storey an element actually occupies, as slab ordinals.
+
+    An element is NOT one storey tall. The plan places duplexes -- a
+    unit running 600 to 1200 is two storeys of the same element -- so
+    reading only its base misses the floor at its mid-storey line. That
+    is what made a four-storey building draw three decks.
+    """
+    s = _storey_of(z0)
+    out = [s]
+    while (s + 1) * STOREY_CM + MIN_STOREY_OCCUPANCY_CM <= z1:
+        s += 1
+        out.append(s)
+    return out
+
+
 def _ring(depth: int, z: float) -> int:
     """How far the growth front has travelled to reach this member:
     grid steps out from the entrance node, plus storeys climbed. Out and
@@ -312,6 +366,97 @@ def _partial_bay(length: float) -> list[tuple[str, float]]:
     return out
 
 
+@dataclass(frozen=True)
+class _RoomRect:
+    """A room footprint shaped like a PlacedElement, so `resolve_walls`
+    can take it. Only `.corners` is read."""
+    corners: list
+
+
+def _seg_distance(p: Point, a: Point, b: Point) -> float:
+    """Distance from a point to the segment ab."""
+    dx, dy = b.x - a.x, b.y - a.y
+    span = dx * dx + dy * dy
+    if span <= 0:
+        return hypot(p.x - a.x, p.y - a.y)
+    t = max(0.0, min(1.0, ((p.x - a.x) * dx + (p.y - a.y) * dy) / span))
+    return hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy))
+
+
+def _on_element_edge(wall, elements) -> bool:
+    """Does this wall lie along ANY element's perimeter? Those are
+    already built by the element wall pass -- drawing them again from
+    the room side would be exactly the duplication walls.py exists to
+    prevent. Every element is checked, not just the one that owns the
+    room: a partition inside one unit can land on the outer wall of the
+    unit next door, and that wall is built either way."""
+    mid = Point((wall.start.x + wall.end.x) / 2, (wall.start.y + wall.end.y) / 2)
+    for el in elements:
+        for i in range(4):
+            a, b = el.corners[i], el.corners[(i + 1) % 4]
+            if all(_seg_distance(p, a, b) <= COLLINEAR_TOL_CM
+                   for p in (wall.start, wall.end, mid)):
+                return True
+    return False
+
+
+def _partition_walls(plan: FloorPlan) -> list[tuple[object, float, float]]:
+    """The INTERNAL dividers: (wall, base_z, top_z) for every wall
+    between the rooms of a unit, each built once.
+
+    The rooms are real surveyed rectangles, and they do NOT tile their
+    unit -- they overlap and they leave gaps. Studio_A's five rooms sum
+    to 45.2m2 inside a 42.2m2 footprint, and its Entrance sits bodily
+    INSIDE the LDK rectangle. So a partition cannot be found by looking
+    for shared edges of a tiling; there is no tiling.
+
+    What works is the same machinery the element walls already use:
+    hand every room rectangle to `resolve_walls`, which groups edges by
+    their supporting line, cuts that line at every interval endpoint and
+    emits each stretch once, owned by whoever covers it. Two rooms
+    either side of a divider produce it once. The Entrance nook's edges
+    get cut where they cross the LDK's, so the overlap resolves into
+    stretches instead of double members.
+
+    Rooms are grouped BY STOREY, and every room on a storey resolves
+    together rather than one unit at a time. Two things follow, and both
+    are needed:
+
+      the storey split keeps a duplex honest -- its lower rooms divide
+        the lower floor and its upper rooms the upper one, where
+        resolving the unit whole would run every partition through both
+
+      resolving ACROSS units dedupes partitions that two neighbours put
+        on the same line. Per unit, five members of one such wall were
+        being built twice, which is the same fault walls.py was written
+        to fix, one scale down.
+    """
+    groups: dict[int, list] = {}
+    for b in generate_room_massing(plan):
+        if b.kind != "room":
+            continue
+        groups.setdefault(_storey_of(b.z0), []).append(b)
+
+    out: list[tuple[object, float, float]] = []
+    for _storey, rooms in sorted(groups.items()):
+        res = resolve_walls([_RoomRect(list(b.base_corners)) for b in rooms])
+        for wall in res.walls:
+            if _on_element_edge(wall, plan.elements):
+                continue
+            # Height comes from the rooms that OWN this stretch, not
+            # from the storey. `resolve_walls` hands back owner indices
+            # into the list it was given, so a partition between two
+            # ordinary rooms is one storey tall while one bounding a
+            # double-height void rises with it. Taking the storey's own
+            # min/max instead let a single tall room stretch every wall
+            # on that floor, which drew 440 members that do not exist.
+            owners = [rooms[i] for i in wall.owners]
+            out.append((wall,
+                        min(b.z0 for b in owners),
+                        max(b.z1 for b in owners)))
+    return out
+
+
 def _touches_bays(x: float, y: float, box) -> bool:
     """Does this element reach into any of the four bays meeting at the
     grid node? That is the region a node's column actually carries --
@@ -330,9 +475,11 @@ def build_frame(plan: FloorPlan, joint_blocks: bool = False,
     Reads only plan.walls -- already deduplicated, so every member here
     is built exactly once -- and plan.elements for heights.
 
-    joint_blocks places the full 240x240 woven capital at every junction.
-    Off by default: it is wider than the spacing of most of the plan's
-    nodes, so it self-intersects. See the module docstring.
+    joint_blocks places the full 240x240 woven capital on EVERY column,
+    at every storey -- 240 inside a 360 grid, so it clears its
+    neighbours. Off by default because the bare column and its plate
+    read more clearly while judging the plan, not because it does not
+    fit. See the module docstring.
 
     course_cm is the vertical pitch of the beam courses that fill each
     wall. The default of one course per storey draws the ceiling beam
@@ -381,8 +528,11 @@ def build_frame(plan: FloorPlan, joint_blocks: bool = False,
             near = [b for b in boxes if _touches_bays(x, y, b)]
             levels = set()
             for _lv, _x0, _y0, _x1, _y1, z0, z1 in near:
-                for s in range(_storey_of(z0), _storey_of(z1 - 1) + 1):
-                    levels.add(s)
+                # The same rule the decks use, so a column and the floors
+                # it carries can never disagree about which storeys the
+                # element occupies -- including the duplexes, which are
+                # two storeys of one element.
+                levels.update(_spanned_storeys(z0, z1))
             if not levels:
                 continue          # carries no floor at any storey
             cells[(i, j)] = {
@@ -491,12 +641,17 @@ def build_frame(plan: FloorPlan, joint_blocks: bool = False,
                 ))
 
     # --- the woven capital, only where asked for ---------------------
+    # EVERY node, not only the junctions. The capital is how a column
+    # head meets its beams, and a corner column meets two of them the
+    # same way a cross meets four -- the arms it has no beam on simply
+    # stop, which is what the surveyed assembly does at the building
+    # edge. Restricting it to 3+ arrivals left the perimeter columns
+    # topped with a bare plate while the interior ones were woven, so
+    # the frame read as two different buildings.
     joint_overlaps = 0
     if joint:
         span = max(joint["footprint_cm"])
         for node in nodes:
-            if not node.is_junction:
-                continue
             near = min((hypot(node.x - o.x, node.y - o.y)
                         for o in nodes if o.id != node.id), default=1e9)
             if near < span:
@@ -601,9 +756,13 @@ def build_frame(plan: FloorPlan, joint_blocks: bool = False,
                     cursor += part
 
     # --- floor deck: step 4r + 2 -------------------------------------
-    # One plate per element footprint, sitting on the slab line of its
-    # own storey. Per element rather than per level because that is what
-    # the plan actually covers -- a level is not a rectangle.
+    # One plate per element footprint per STOREY THE ELEMENT SPANS,
+    # sitting on each slab line it crosses. Per element rather than per
+    # level because that is what the plan actually covers -- a level is
+    # not a rectangle -- and per storey because an element is not one
+    # storey tall: a duplex running 600 to 1200 needs a floor at 900 as
+    # well as at its own base. Decking only the base drew three floors
+    # on a four-storey building.
     def _nearest_depth(x: float, y: float) -> int:
         best, bd = 0, float("inf")
         for nd in nodes:
@@ -617,13 +776,30 @@ def build_frame(plan: FloorPlan, joint_blocks: bool = False,
         ys = [c.y for c in el.corners]
         cx, cy = (min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2
         z0 = getattr(el, "z0", 0.0)
-        members.append(FrameMember(
-            kind="floor", component="Deck",
-            cx=cx, cy=cy, cz=z0 + FLOOR_CM / 2,
-            sx=max(xs) - min(xs), sy=max(ys) - min(ys), sz=FLOOR_CM,
-            angle=0.0, node_id=-1,
-            growth_step=_step(_nearest_depth(cx, cy), z0, PHASE_FLOOR),
-        ))
+        depth = _nearest_depth(cx, cy)
+        sx, sy = max(xs) - min(xs), max(ys) - min(ys)
+        for storey in _spanned_storeys(z0, z0 + el.height_cm):
+            z = storey * STOREY_CM
+            members.append(FrameMember(
+                kind="floor", component="Deck",
+                cx=cx, cy=cy, cz=z + FLOOR_CM / 2,
+                sx=sx, sy=sy, sz=FLOOR_CM,
+                angle=0.0, node_id=-1,
+                growth_step=_step(depth, z, PHASE_FLOOR),
+            ))
+            # The ceiling caps the SAME storey, so it arrives in the
+            # same step as the floor rather than a ring later -- which
+            # is why the ring is taken from the storey's own datum `z`
+            # and not from the soffit height, which rounds up into the
+            # storey above.
+            members.append(FrameMember(
+                kind="ceiling", component="Ceiling",
+                cx=cx, cy=cy,
+                cz=z + STOREY_CM - CATALOG["N"]["thickness_cm"] - CEILING_CM / 2,
+                sx=sx, sy=sy, sz=CEILING_CM,
+                angle=0.0, node_id=-1,
+                growth_step=_step(depth, z, PHASE_FLOOR),
+            ))
 
     # --- wall infill: step 4r + 3 ------------------------------------
     # The walls between the bays. All four Beam A arms sit coplanar at
@@ -644,8 +820,21 @@ def build_frame(plan: FloorPlan, joint_blocks: bool = False,
         top = max(getattr(el, "z0", 0.0) + el.height_cm for el in owners)
         return base, top
 
-    for wall in plan.walls:
-        wbase, wtop = _wall_span(wall)
+    # Partition members already placed, as (x, y, z, length, angle).
+    # A double-height room reaches into the storey above it, so its
+    # divider and the divider of an ordinary room up there can be the
+    # same physical member arrived at from two storey groups -- 3Bed_A's
+    # Foyer runs 600 to 1200 and meets 4Bed_A's LDK at 1195. Resolving
+    # per storey cannot see across storeys, so the last guard is here.
+    # Element walls need none of this: they are all whole storeys.
+    placed: set[tuple] = set()
+
+    def _emit_wall(wall, wbase: float, wtop: float, kind: str) -> None:
+        """Course one resolved wall into members. Shared by the element
+        walls and the room partitions so the two cannot drift into
+        drawing a wall two different ways -- they are the same thing at
+        different scales, and a divider is built out of the same
+        catalog parts as the envelope."""
         near = _nearest_depth((wall.start.x + wall.end.x) / 2,
                               (wall.start.y + wall.end.y) / 2)
         grow_sign = -1
@@ -669,6 +858,14 @@ def build_frame(plan: FloorPlan, joint_blocks: bool = False,
             # Unit normal in plan, for the alternating course offset.
             nx, ny = -dy / length, dx / length
             for ordinal, lv in levels:
+                # A course may not sit above the wall it belongs to.
+                # _levels rounds a part-storey up to a whole one, which
+                # is right for the envelope -- every element wall is a
+                # whole storey -- but rooms are not: a 150cm balcony
+                # parapet was getting its course at 1195, 145cm above
+                # the room, floating in open air.
+                if wbase + lv > wtop + CUT_TOL_CM:
+                    continue
                 cz = wbase + lv - spec["thickness_cm"] / 2
                 # The ceiling course is the structural beam and stays on
                 # the wall centre line. The courses between it weave
@@ -679,20 +876,43 @@ def build_frame(plan: FloorPlan, joint_blocks: bool = False,
                 # component_exports/components.json).
                 off = (0.0 if ordinal % per_storey == 0
                        else spec["width_cm"] / 2 * (1 if ordinal % 2 else -1))
+                cx, cy = mx + nx * off, my + ny * off
+                if kind == "partition":
+                    mark = (round(cx, 1), round(cy, 1), round(cz, 1),
+                            round(length, 1), round(ang, 3))
+                    if mark in placed:
+                        continue
+                    placed.add(mark)
                 members.append(FrameMember(
-                    kind="infill", component=seg.component,
-                    cx=mx + nx * off, cy=my + ny * off, cz=cz,
+                    kind=kind, component=seg.component,
+                    cx=cx, cy=cy, cz=cz,
                     sx=length, sy=spec["width_cm"], sz=spec["thickness_cm"],
                     angle=ang, node_id=-1, grow_sign=grow_sign,
                     growth_step=_step(near, cz, PHASE_INFILL),
                 ))
+
+    for wall in plan.walls:
+        wbase, wtop = _wall_span(wall)
+        _emit_wall(wall, wbase, wtop, "infill")
+
+    # --- room partitions: step 4r + 3 --------------------------------
+    # The dividers BETWEEN the rooms of a unit, as opposed to the walls
+    # around it. Same phase as the infill because they are the same act
+    # of building -- the envelope of a unit and the divisions inside it
+    # both go up once its bay is framed.
+    for wall, wbase, wtop in _partition_walls(plan):
+        _emit_wall(wall, wbase, wtop, "partition")
 
     steps = (max((m.growth_step for m in members), default=-1) + 1)
 
     by_step: dict[int, list[FrameMember]] = {}
     for m in members:
         by_step.setdefault(m.growth_step, []).append(m)
-    junctions = {nd.id for nd in nodes if nd.is_junction}
+    # Which nodes actually got a capital, read off the members rather
+    # than off is_junction -- with joint_blocks off none of them do, and
+    # the label used to report a capital count for lacing that was never
+    # drawn.
+    capitals = {m.node_id for m in members if m.kind == "lacing"}
 
     labels: list[str] = []
     for s in range(steps):
@@ -706,13 +926,15 @@ def build_frame(plan: FloorPlan, joint_blocks: bool = False,
         phase = s % 4
         if phase == PHASE_COLUMN:
             ids = {m.node_id for m in at}
-            caps = len(ids & junctions)
+            caps = len(ids & capitals)
             labels.append(f"columns · {len(ids)} node{'s' if len(ids) != 1 else ''}"
                           + (f", {caps} capital" if caps else "") + ring)
         elif phase == PHASE_BEAM:
             labels.append(f"beams · {len(at)} member{'s' if len(at) != 1 else ''}" + ring)
         elif phase == PHASE_FLOOR:
-            labels.append(f"floor · {len(at)} deck{'s' if len(at) != 1 else ''}" + ring)
+            decks = sum(1 for m in at if m.kind == "floor")
+            labels.append(f"floor · {decks} deck{'s' if decks != 1 else ''}"
+                          + " + ceilings" + ring)
         else:
             labels.append(f"infill · {len(at)} member{'s' if len(at) != 1 else ''}" + ring)
 
@@ -744,11 +966,18 @@ def frame_summary(frame: Frame) -> dict:
         "post_count": sum(1 for m in frame.members if m.kind == "post"),
         "beam_count": sum(1 for m in frame.members if m.kind == "beam"),
         "infill_count": sum(1 for m in frame.members if m.kind == "infill"),
+        "partition_count": sum(1 for m in frame.members if m.kind == "partition"),
         "floor_count": sum(1 for m in frame.members if m.kind == "floor"),
+        "ceiling_count": sum(1 for m in frame.members if m.kind == "ceiling"),
         "plate_count": sum(1 for m in frame.members if m.kind == "plate"),
         "lacing_count": sum(1 for m in frame.members if m.kind == "lacing"),
         "node_count": len(frame.nodes),
         "junction_count": sum(1 for n in frame.nodes if n.is_junction),
+        # Nodes actually carrying a woven capital -- every node when
+        # joint_blocks is on, none when it is off. junction_count above
+        # is a different thing now: how many nodes take 3+ beams.
+        "capital_count": len({m.node_id for m in frame.members
+                              if m.kind == "lacing"}),
         "max_depth": max((n.depth for n in frame.nodes), default=0),
         "by_component": by_component,
         # The structural grid the columns stand on, and how many of its

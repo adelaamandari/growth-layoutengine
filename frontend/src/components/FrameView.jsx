@@ -167,7 +167,7 @@ export default function FrameView({ frame, animate = true }) {
             {phase
               ? `${String(phase.step + 1).padStart(2, "0")}/${phase.total} · ${phase.label}`
               : frame
-                ? `${frame.summary?.member_count ?? 0} members · ${frame.summary?.junction_count ?? 0} capitals`
+                ? `${frame.summary?.member_count ?? 0} members · ${frame.summary?.node_count ?? 0} columns`
                 : "…"}
           </span>
           <span className="track" aria-hidden="true"><span className="fill" ref={fillRef} /></span>

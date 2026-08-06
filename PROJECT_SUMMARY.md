@@ -263,7 +263,45 @@ frontend/                React + Vite viewer
   components. There are five kinds of member and they are not the same thing:
   `post` and `plate` (the column bundle and its connector), `beam` (a primary
   member on a grid line), `infill` (a wall member between the bays), and
-  `floor` (a storey deck).
+  `partition` (a divider between the rooms *inside* a unit, as against the
+  envelope around it), `floor` (a storey deck — one per element **per storey
+  it spans**, since a duplex is one element two storeys tall and needs a floor
+  at its mid-storey line as well as at its base) and `ceiling` (the soffit
+  capping that same storey).
+  - **Room partitions come from the surveyed rooms, not from a tiling.** The
+    rooms do *not* tile their unit: Studio_A's five rooms sum to 45.2m² inside
+    a 42.2m² footprint, and its Entrance sits bodily *inside* the LDK
+    rectangle. So there are no "shared edges" to read partitions off. What
+    works is handing every room rectangle to `walls.resolve_walls` — the same
+    machinery the envelope uses — which groups edges by supporting line, cuts
+    at every interval endpoint and emits each stretch once. Two rooms either
+    side of a divider produce it once; the Entrance nook's overlap resolves
+    into stretches rather than doubled members. Partitions are then coursed by
+    the same `_emit_wall` as the envelope, so the two cannot drift into
+    drawing a wall two different ways.
+  - Three things that each cost a real bug on the way in, all guarded now:
+    rooms are grouped **by storey** (per-unit grouping missed partitions two
+    neighbours put on the same line — 5 members built twice); each wall takes
+    the z-span of **the rooms that own it**, from `resolve_walls`' owner
+    indices (taking the storey's own min/max let one tall room stretch every
+    wall on that floor, 440 phantom members); and a member-level guard catches
+    the last case storey grouping cannot see, where a double-height room
+    reaches into the storey above and meets an ordinary room's divider there.
+  - A course may not sit above the wall it belongs to. `_levels` rounds a
+    part-storey up to a whole one, which is right for the envelope — every
+    element wall is a whole storey — but rooms are not, and a 150cm balcony
+    parapet was getting its course 145cm above the room, floating in open air.
+  - **A storey stacks floor / volume / ceiling / beams / next floor**, with
+    nothing coplanar. The deck sits on the slab line (0–10), the ceiling hangs
+    at 280–290, and the primary beams keep the top 10cm (290–300) they have in
+    the source assembly. The ceiling is deliberately *under* the beams rather
+    than level with them — coplanar faces z-fight, and the beams are structure
+    while the ceiling is not. It is drawn in a cool pale grey against the
+    deck's warm grey (`Ceiling` vs `Deck` in `frameInstances.js`) so a storey
+    reads floor-below / ceiling-above at a glance. Floor and ceiling of a
+    storey arrive in the same growth step, which is why the ring is taken from
+    the storey datum and not the soffit height — the latter rounds up into the
+    storey above.
   - **The grid is independent of the rooms, and no column stands outside the
     volume.** A column stands at every intersection of the 360cm grid that
     falls inside the massing — so some land inside rooms, and walls become
@@ -318,12 +356,20 @@ frontend/                React + Vite viewer
         step 4r + 1   primary beams span the grid lines between them
         step 4r + 2   the floor deck lands on those beams
         step 4r + 3   the walls infill between the bays
+  - The woven capital tops **every** column, not only the nodes where three or
+    more beams arrive. A corner column heads into its capital the same way a
+    cross does; the arms with no beam to meet simply stop. Restricting it to
+    junctions left the perimeter columns capped with a bare plate while the
+    interior ones were woven, which read as two different buildings.
+    `capital_count` in the summary is how many columns actually carry one — all
+    of them when `joint_blocks` is on, none when it is off, which is what the
+    growth-step labels now count too.
   - `frame_summary()` reports provenance (surveyed vs. placeholder catalog),
-    the course pitch, and two places the source and the engine disagree:
-    `length_deviation` (the catalog is fixed-length, `components.py` rescales)
-    and `joint_overlaps` (on the default program, 15 of 28 capitals sit closer
-    to a neighbour than the 240cm joint is wide, so the full joint block
-    self-intersects there and is off by default).
+    the course pitch, and `length_deviation` — the one place the source and
+    the engine still disagree, since the catalog is fixed-length and
+    `components.py` rescales. `joint_overlaps` measures capital clearance and
+    is **0** on the 360 grid: the joint is 240 wide, so it fits at every node
+    with 120 to spare. It is kept because an irregular grid would report it.
 - **`preview.py`** — **NEW.** `render_svg()` / `save_svg()` draw a plan to a
   plain SVG, no matplotlib. Also `plan_to_dict()` for a web viewer. Runs as
   `python -m growth_engine.preview --seed 42 --out plan.svg`.
@@ -420,16 +466,21 @@ converts (to metres), because that is what Blender and Rhino expect.
   might vary branch count based on program size or site geometry.
 - **The woven joint capital still projects past the massing.** With
   `joint_blocks` on, the 240×240 assembly at an edge node throws its arms up
-  to **75cm outside the volume** — the same category of problem the columns
-  and beams have now been fixed for, but clipping it would mean drawing a
-  partial capital, which is a decision about the assembly rather than about
-  where it goes. Left alone because the joint block is still an open question.
+  to **80cm outside the volume** — 348 lacing members on the default program,
+  now that every column carries a capital rather than only the junctions. It
+  is the same category of problem the columns and beams have been fixed for,
+  but clipping it would mean drawing a partial capital, which is a decision
+  about the assembly rather than about where it goes. This is the joint
+  block's remaining open question; whether it belongs on every column is not,
+  it does.
 - **A large program's frame gets heavy.** The frame is one
   `InstancedMesh`, so it is still a single draw call, but `applyMembers()`
   rewrites every instance matrix each tick while the growth animation runs.
-  The default program is ~7.6k members; a 24-entry program reached **19,599**.
-  If that stutters, the fix is to stop rewriting members that have finished
-  growing, not to thin the frame.
+  The default program is ~7.6k members at 100cm courses, **17.5k** with the
+  joint block on — the capital is now 9,888 of them, up from ~6.6k when only
+  junctions got one. A 24-entry program reached **19,599** without it. If that
+  stutters, the fix is to stop rewriting members that have finished growing,
+  not to thin the frame.
 - **The branch cap is one number for the whole building.** `max_branch_cm`
   applies to every run on every level, so the plan compacts uniformly rather
   than, say, keeping a longer ground floor under a smaller upper one. A
@@ -471,13 +522,17 @@ converts (to metres), because that is what Blender and Rhino expect.
   averaging in the exact spans would dilute the one number that matters.
   Closing the remainder properly means either a real closer part or snapping
   wall lengths to the grid, which would move the surveyed unit footprints.
-- **The 240×240 joint block does not fit its own plan.** On the default
-  program, 15 of 28 capitals sit closer to a neighbour than the woven capital
-  is wide, so it self-intersects there. Off by default, counted, and
-  toggleable — but whether the answer is a smaller capital, wider bays, or
-  clipping the assembly per node is unresolved.
 
 ## Solved since the original summary
+
+- ~~**The 240×240 joint block does not fit its own plan.**~~ Resolved
+  2026-08-06 — by the structural grid rather than by anything done to the
+  joint. When nodes came from wall ends they landed wherever a wall happened
+  to stop, and 15 of 28 capitals sat closer to a neighbour than the 240cm
+  assembly is wide. On the 360 grid the closest two nodes can be is 360, so
+  the capital clears with 120 to spare and `joint_overlaps` is **0**. The
+  capital now goes on every column, and `joint_blocks` stays off by default
+  only because the bare column reads more clearly while judging a plan.
 
 - ~~**Shared walls were built twice.**~~ Resolved 2026-07-31 in `walls.py`;
   see the mirror-pair section above. Guarded by `diagnostics.verify_walls()`,
@@ -496,8 +551,35 @@ converts (to metres), because that is what Blender and Rhino expect.
   primary beam members come out at exact catalog length**, every column starts
   at ground level, nothing is drawn below it, and `verify_walls` still holds
   at delta 0.00m.
-- ~~**There was no floor.**~~ A deck is drawn per element at its own storey
-  datum, growing in its own phase after the beams it lands on.
+- ~~**There was no floor.**~~ A deck is drawn per element per storey the
+  element spans, growing in its own phase after the beams it lands on, with a
+  ceiling soffit capping the same storey.
+- ~~**One course per storey was hidden on the Build tab.**~~ Resolved
+  2026-08-06. `COURSE_OPTIONS` in `App.jsx` was `[150, 100, 75, 60]` and 300 —
+  the pitch that draws the frame the Frame tab draws — was tacked on after the
+  loop as a bare `ceiling only` option. It was reachable, but it sat last, out
+  of numeric order, and did not read as a pitch, so Build always opened with
+  its walls filled with courses and looked crowded next to Frame. 300 is now
+  first in the list, labelled `300 cm · ceiling only`, and is the default.
+  Drop the pitch to fill the walls again.
+- ~~**A four-storey building drew three floors.**~~ Resolved 2026-08-06. The
+  deck loop emitted one plate per element at its base `z0`, but an element is
+  not one storey tall — the plan places **duplexes**, 600cm units spanning two
+  storeys (see the growth-logic section). Three of them top out at 1200, so
+  the building is four storeys, but slabs only ever landed at 0/300/600 and
+  the mid-storey line of each duplex had no floor. `_spanned_storeys()` now
+  returns every slab line an element crosses, and both the deck loop and the
+  node-height calculation read it, so a column and the floors it carries
+  cannot disagree about which storeys an element occupies. Decks on the
+  default program: 24 → 28, at 0/300/600/**900**.
+  - The half-storey threshold in `MIN_STOREY_OCCUPANCY_CM` is the reason this
+    is not just `z1 // STOREY_CM`. Surveyed unit heights overshoot the nominal
+    300 storey by a few cm — one unit in the default program is **307.5** —
+    and 7.5cm of survey drift is not another floor. A real duplex clears the
+    line by a full 300, so half a storey separates them cleanly. Feeding the
+    same rule into the node heights also dropped 4 stub beams that were being
+    drawn at a storey the plan does not occupy, which is what
+    `FrameNode.levels` always said should happen.
 - ~~**The plan only ever grew outward.**~~ Every unit ran onto the three
   ground-floor branches, so the composition sprawled and the core served one
   storey. `max_branch_cm` now stacks it. Checked over 200 random programs

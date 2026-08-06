@@ -26,8 +26,21 @@ export const COMPONENT_COLOR = {
   B2: 0xc2a374,      // short verticals inside the capital
   Deck: 0x9d8f78,    // the storey deck -- greyer than the members, so
                      // the structure still reads against it
+  Ceiling: 0xc3cbd2, // the soffit capping the same storey. Cool and
+                     // pale against the Deck's warm grey, so a storey
+                     // reads floor-below / ceiling-above at a glance
+                     // rather than as two identical slabs
 };
 export const DEFAULT_COLOR = 0xb08d5c;
+
+// Room partitions are the SAME catalog parts as the envelope walls --
+// same N/SA/SB/SC, same sections. This override is legibility only: at
+// the envelope's own tones a divider inside a unit is indistinguishable
+// from the wall around it, and the point of drawing them is to read the
+// division. Cooler and a shade darker, so they sit back.
+export const KIND_COLOR = {
+  partition: 0x8a7250,
+};
 
 // Growth pacing. Slower than the massing animation: the spread is the
 // point of these views rather than a flourish on top of them.
@@ -70,18 +83,19 @@ export function buildFrameInstances(members, box) {
     const m = members[i];
     const [cx, cy, cz] = m.c;
     const [sx, sy, sz] = m.s;
-    colour.setHex(COMPONENT_COLOR[m.component] ?? DEFAULT_COLOR);
+    colour.setHex(KIND_COLOR[m.kind] ?? COMPONENT_COLOR[m.component] ?? DEFAULT_COLOR);
     mesh.setColorAt(i, colour);
 
     // Engine is Z-up (x, y in plan, z height); three.js is Y-up, so
     // engine y maps to -z. The member's own axis is local x, rotated
     // about the vertical by `angle`.
     items[i] = {
-      // Only members that SPAN extend sideways -- primary grid beams
-      // and the wall infill between the bays. Everything else (posts,
-      // rungs, the connector plate, the capital lacing, the floor deck)
-      // rises in place.
-      post: m.kind !== "beam" && m.kind !== "infill",
+      // Only members that SPAN extend sideways -- primary grid beams,
+      // the wall infill between the bays, and the room partitions,
+      // which are the same horizontal members one scale down.
+      // Everything else (posts, rungs, the connector plate, the capital
+      // lacing, the floor deck, the ceiling) rises in place.
+      post: m.kind !== "beam" && m.kind !== "infill" && m.kind !== "partition",
       x: cx * CM_TO_M,
       z: -cy * CM_TO_M,
       yBase: (cz - sz / 2) * CM_TO_M,   // underside, the end that stays put

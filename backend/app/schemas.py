@@ -30,9 +30,10 @@ class PlanRequest(BaseModel):
     program: list[str] = Field(default_factory=lambda: list(DEFAULT_PROGRAM))
     seed: int | None = 42
     per_room: bool = True
-    # /api/frame only: place the full 240x240 woven capital at every
-    # junction. Off by default because it is wider than the spacing of
-    # most nodes -- see growth_engine.frame.
+    # /api/frame only: place the full 240x240 woven capital on every
+    # column. Off by default because the bare column reads more clearly
+    # while judging the plan -- it fits at every node on the 360 grid.
+    # See growth_engine.frame.
     joint_blocks: bool = False
     # /api/frame only: vertical pitch of the beam courses filling each
     # wall. None means one course per storey, i.e. the ceiling beam
@@ -137,8 +138,9 @@ class FrameMemberOut(BaseModel):
     """One timber member. Centre `c` and size `s` are packed as arrays
     rather than named fields because a frame runs to a few thousand
     members and the field names would dominate the payload."""
-    kind: str             # "post" | "beam"
-    component: str        # "N" | "SA" | "SB" | "SC"
+    # "post" | "plate" | "beam" | "infill" | "floor" | "ceiling" | "lacing"
+    kind: str
+    component: str        # "N" | "SA" | "SB" | "SC" | "Deck" | "Ceiling" | ...
     c: list[float]        # centre [x, y, z], cm
     s: list[float]        # size [length, width, depth], cm
     angle: float          # radians about the vertical axis
