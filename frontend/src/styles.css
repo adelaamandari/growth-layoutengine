@@ -347,13 +347,17 @@ button, select, input { font: inherit; font-family: var(--sans); }
    Takes the leftover height of the main column, and when the panels
    below are long enough to push it (the Frame and Build tabs both
    explain themselves at length) it stops at the floor and the column
-   scrolls instead. The floor is `min(520px, 52vh)` rather than a flat
+   scrolls instead. The floor is `min(880px, 74vh)` rather than a flat
    number so a short window gets a proportionate drawing rather than a
-   viewport made almost entirely of prose. */
+   viewport made almost entirely of prose.
+
+   The drawing is the subject and the prose underneath is reference, so
+   the floor is deliberately high: the panels scroll, the plan does not
+   shrink to make room for them. */
 .viewport {
   position: relative; background: var(--bg-light); border: 1px solid var(--border-light);
   display: flex; flex-direction: column;
-  flex: 1 1 auto; min-height: min(520px, 52vh);
+  flex: 1 1 auto; min-height: min(880px, 74vh);
 }
 .viewport > svg, .canvas-mount { flex: 1 1 auto; min-height: 0; width: 100%; display: block; }
 .viewport > svg { touch-action: none; cursor: grab; height: 100%; }

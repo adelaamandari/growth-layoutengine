@@ -419,6 +419,10 @@ def _spawn_tertiary(branches: list[dict], pitch_cm: float,
                     "dir": d, "pd": Point(-d.y, d.x),
                     "start": anchor + d.scaled(CORRIDOR_HALF),
                     "offset_l": 0.0, "offset_r": 0.0, "depth": 1,
+                    # Which run this hangs off, and how far along it. The
+                    # parent has to be built out at least this far or the
+                    # two never meet -- see the corridor emit below.
+                    "parent": br, "anchor_t": t,
                 })
             t += pitch_cm
     return out
@@ -724,6 +728,31 @@ def generate_floorplan(program: list[str], seed: int | None = None,
     # corridor to units it already reaches, never orphan one: every unit
     # was placed at an offset whose own corridor bay tested on-site.
     for level_i, branches in level_branches:
+        # A CONNECTED NETWORK, not a set of strips.
+        #
+        # A branch corridor is only as long as the units that ended up on
+        # it. A tertiary hangs off its parent at a fixed distance, and
+        # that distance is often FURTHER than the parent's own units
+        # reached -- so the parent was built short, the tertiary started
+        # in mid-air, and the plan came out as three to five disconnected
+        # pieces of circulation with no way between them.
+        #
+        # So each parent is extended to reach the furthest child that
+        # actually took anything. The corridor exists to connect what was
+        # built; its length has to answer to the children as well as to
+        # its own bays.
+        for br in branches:
+            if br.get("depth", 0) != 0:
+                continue
+            for child in branches:
+                if child.get("parent") is not br:
+                    continue
+                if max(child["offset_l"], child["offset_r"]) <= 0:
+                    continue          # child took nothing; nothing to meet
+                reach = child["anchor_t"]
+                if reach > br["offset_l"] and reach > br["offset_r"]:
+                    br["offset_l"] = max(br["offset_l"], reach)
+
         for br in branches:
             total = max(br["offset_l"], br["offset_r"])
             # Trimmed back until it is BOTH on the site and clear of what

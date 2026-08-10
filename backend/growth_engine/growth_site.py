@@ -52,7 +52,7 @@ import random
 from dataclasses import dataclass
 
 from .catalog import get_unit
-from .geometry import Point, polygon_contains, polygons_overlap
+from .geometry import Point, polygon_area, polygon_contains, polygons_overlap
 from .growth import (
     CORRIDOR_WIDTH_CM,
     generate_floorplan,
@@ -518,103 +518,157 @@ def _fill_residual(elements, occupied, ctx: SiteContext, keys, counts,
     Whatever the building did not take becomes green.
 
     This is Adela's decision, and it is the one that makes the diagonal
-    edge cheap: green areas build no walls, carry no frame and are not
-    floor area, so they can take any shape the leftover makes without a
-    single new joint. The acute corner of the triangle, which an
-    orthogonal grid can never reach, becomes landscape -- which is
-    exactly what both her sketches do.
+    cheap: green areas build no walls, carry no frame and are not floor
+    area, so leftover shape costs nothing and no new joint is needed. The
+    acute corner an orthogonal grid can never reach becomes landscape.
 
-    Cells are merged into maximal rectangles rather than emitted one by
-    one: 90cm cells would otherwise put thousands of elements in the
-    plan. The result is a STEPPED edge at 90cm, which at this scale reads
-    as following the diagonal. True polygons are the next increment and
-    need N-corner support in massing and the 3D views.
+    Each connected region of free cells becomes ONE polygon, traced round
+    its own outline. It used to be carved into maximal rectangles, which
+    was cheap and looked like it: a garden arrived as four or five boxes
+    stacked into an approximate L, with seams through the middle of what
+    is one piece of ground. A region is one thing and is now drawn as one
+    thing, following the diagonal in 90cm steps.
+
+    Green polygons may be NON-CONVEX, which nothing else in the engine
+    is. That is safe precisely because they build nothing: walls, frame
+    and floor area all skip them via growth.builds_walls, and the only
+    consumers are the plan drawing, the extrusion and the area, all of
+    which handle any simple polygon. The overlap test does NOT -- it is
+    SAT, which assumes convex -- so regions are not overlap-tested
+    against each other. They cannot overlap: they are disjoint sets of
+    cells that were each checked free before the region was formed.
     """
     res_m = resolution_cm / 100.0
     field = build_field(ctx.boundary_m, ctx.families, res_m)
 
-    free = {}
+    free: dict[tuple[int, int], Point] = {}
     for c in field.cells:
         p = _to_cm(ctx, c.x, c.y)
-        cell = [Point(p.x - resolution_cm / 2, p.y - resolution_cm / 2),
-                Point(p.x + resolution_cm / 2, p.y - resolution_cm / 2),
-                Point(p.x + resolution_cm / 2, p.y + resolution_cm / 2),
-                Point(p.x - resolution_cm / 2, p.y + resolution_cm / 2)]
+        half = resolution_cm / 2
+        cell = [Point(p.x - half, p.y - half), Point(p.x + half, p.y - half),
+                Point(p.x + half, p.y + half), Point(p.x - half, p.y + half)]
         if _free(occupied, 0, 1, cell) and polygon_contains(cell, ctx.boundary):
             free[(c.ix, c.iy)] = p
 
     if not free:
         return
 
-    # Greedy maximal rectangles: take the largest block of free cells
-    # anywhere, emit it, remove it, repeat. Cheap and good enough -- this
-    # is landscape, not a take-off.
+    # Cell lattice -> world. Cell (i, j) spans [i, i+1] x [j, j+1] in
+    # lattice units; anchor off a known cell centre so the mapping is
+    # exact rather than reconstructed from the field's bounds.
+    (i0, j0), p0 = next(iter(free.items()))
+    ox = p0.x - (i0 + 0.5) * resolution_cm
+    oy = p0.y - (j0 + 0.5) * resolution_cm
+
     order = 0
-    while free:
-        best = _largest_rect(free)
-        if best is None:
-            break
-        (i0, j0, w, h) = best
-        pts = [free[(i0, j0)], free[(i0 + w - 1, j0)],
-               free[(i0 + w - 1, j0 + h - 1)], free[(i0, j0 + h - 1)]]
-        x0 = min(p.x for p in pts) - resolution_cm / 2
-        x1 = max(p.x for p in pts) + resolution_cm / 2
-        y0 = min(p.y for p in pts) - resolution_cm / 2
-        y1 = max(p.y for p in pts) + resolution_cm / 2
-        corners = [Point(x0, y0), Point(x1, y0), Point(x1, y1), Point(x0, y1)]
-
-        for i in range(i0, i0 + w):
-            for j in range(j0, j0 + h):
-                free.pop((i, j), None)
-
-        # Too small to be a garden -- it is a gap, and naming one would be
-        # generous. Dropped rather than emitted as litter.
-        if (x1 - x0) * (y1 - y0) < MIN_GREEN_CM2:
+    for region in _regions(free):
+        loop = _trace_outline(region, ox, oy, resolution_cm)
+        if len(loop) < 3:
             continue
-
+        if polygon_area(loop) < MIN_GREEN_CM2:
+            # Too small to be a garden -- it is a gap, and naming one
+            # would be generous.
+            continue
         key = keys[order % len(keys)]
         order += 1
-        if _place(elements, occupied, ctx.boundary, "outdoor", key, corners,
-                  0, height_cm=OUTDOOR_HEIGHT_CM):
-            counts[key] = counts.get(key, 0) + 1
+        _claim(occupied, 0, 1, loop)
+        elements.append(PlacedElement("outdoor", key, loop,
+                                      height_cm=OUTDOOR_HEIGHT_CM, level=0))
+        counts[key] = counts.get(key, 0) + 1
 
 
-def _largest_rect(free: dict) -> tuple | None:
-    """Largest all-free axis-aligned block of cells, by area.
+def _regions(free: dict) -> list[set]:
+    """Connected components of free cells, four-connectivity."""
+    seen: set = set()
+    out = []
+    for cell in free:
+        if cell in seen:
+            continue
+        stack = [cell]
+        seen.add(cell)
+        comp = set()
+        while stack:
+            i, j = stack.pop()
+            comp.add((i, j))
+            for n in ((i + 1, j), (i - 1, j), (i, j + 1), (i, j - 1)):
+                if n in free and n not in seen:
+                    seen.add(n)
+                    stack.append(n)
+        out.append(comp)
+    return sorted(out, key=len, reverse=True)
 
-    Largest-rectangle-in-histogram, row by row, with a monotonic stack:
-    O(cells) per call. The obvious nested-loop version -- for every cell,
-    grow every width and height -- is O(cells x w x h), which on a 90cm
-    field of a few thousand cells took seconds per call and this is
-    called once per green area.
+
+def _trace_outline(region: set, ox: float, oy: float, res: float) -> list[Point]:
+    """The outline of a set of cells, as one polygon.
+
+    Every cell side with no neighbour behind it is a boundary edge,
+    emitted DIRECTED so the region stays on one hand; chaining them then
+    has no ambiguity at a corner where four cells meet diagonally. Runs
+    of collinear edges collapse, so a straight 20m side is two points
+    rather than twenty-two.
+
+    Only the outer loop is kept. A region with a hole in it would need
+    the inner loop as well, and a PlacedElement has one ring.
     """
-    if not free:
-        return None
-    js = [j for (_i, j) in free]
-    i_lo = min(i for (i, _j) in free)
-    i_hi = max(i for (i, _j) in free)
-    j_lo, j_hi = min(js), max(js)
-    width = i_hi - i_lo + 1
+    edges: dict[tuple, tuple] = {}
+    for (i, j) in region:
+        if (i, j - 1) not in region:
+            edges[(i, j)] = (i + 1, j)
+        if (i + 1, j) not in region:
+            edges[(i + 1, j)] = (i + 1, j + 1)
+        if (i, j + 1) not in region:
+            edges[(i + 1, j + 1)] = (i, j + 1)
+        if (i - 1, j) not in region:
+            edges[(i, j + 1)] = (i, j)
+    if not edges:
+        return []
 
-    heights = [0] * (width + 1)      # trailing 0 flushes the stack
-    best = None
+    start = min(edges)
+    loop = [start]
+    cur = edges[start]
+    while cur != start and cur in edges:
+        loop.append(cur)
+        cur = edges.pop(cur) if False else edges[cur]
+        if len(loop) > 4 * len(region) + 8:
+            break                       # malformed; bail rather than spin
 
-    for j in range(j_lo, j_hi + 1):
-        for k in range(width):
-            heights[k] = heights[k] + 1 if (i_lo + k, j) in free else 0
+    pts = [Point(ox + i * res, oy + j * res) for i, j in loop]
 
-        stack: list[int] = []
-        for k in range(width + 1):
-            while stack and heights[stack[-1]] >= heights[k]:
-                h = heights[stack.pop()]
-                left = stack[-1] + 1 if stack else 0
-                w = k - left
-                if h and w:
-                    area = w * h
-                    if best is None or area > best[0]:
-                        # j is the BOTTOM row of the run, so the block
-                        # starts h-1 rows above it.
-                        best = (area, i_lo + left, j - h + 1, w, h)
-            stack.append(k)
+    # Collapse the staircase. Tracing a diagonal edge on a 90cm lattice
+    # gives a step at every cell -- one region came out with 322 corners,
+    # which is the raster, not the shape. Simplified to within one cell,
+    # a run of steps becomes the diagonal it was approximating, which is
+    # both what the ground actually is and what Adela drew.
+    return _simplify(pts, res)
 
-    return None if best is None else (best[1], best[2], best[3], best[4])
+
+def _simplify(pts: list[Point], tol: float) -> list[Point]:
+    """Ramer-Douglas-Peucker on a closed ring."""
+    if len(pts) < 4:
+        return pts
+
+    def _rdp(seq: list[Point]) -> list[Point]:
+        if len(seq) < 3:
+            return seq
+        a, b = seq[0], seq[-1]
+        dx, dy = b.x - a.x, b.y - a.y
+        span = math.hypot(dx, dy)
+        worst, idx = -1.0, 0
+        for k in range(1, len(seq) - 1):
+            p = seq[k]
+            if span < 1e-9:
+                d = math.hypot(p.x - a.x, p.y - a.y)
+            else:
+                d = abs(dx * (a.y - p.y) - dy * (a.x - p.x)) / span
+            if d > worst:
+                worst, idx = d, k
+        if worst <= tol:
+            return [a, b]
+        return _rdp(seq[:idx + 1])[:-1] + _rdp(seq[idx:])
+
+    # Split the ring at two far-apart points so RDP has open chains to
+    # work on -- run on a closed loop it would collapse the whole thing
+    # to its two endpoints.
+    half = len(pts) // 2
+    out = _rdp(pts[:half + 1])[:-1] + _rdp(pts[half:] + [pts[0]])[:-1]
+    return out if len(out) >= 3 else pts
