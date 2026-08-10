@@ -113,6 +113,7 @@ def _build_plan(req: PlanRequest):
                 inset_m=req.site_inset_m, entrance_edge=req.entrance_edge,
                 resolution_cm=req.grid_resolution_cm,
                 branch_depth=req.branch_depth,
+                program_repeat=req.program_repeat,
                 street_names=["Coffey St", "Deptford Church St", "Crossfield St"],
             )
         if req.strategy == "site":

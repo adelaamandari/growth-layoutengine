@@ -71,6 +71,9 @@ export default function App() {
   // Orders of circulation: 1 is spine + arms, 2 adds the tertiary runs
   // that cross the arms again.
   const [subBranches, setSubBranches] = useState(true);
+  // How many times the program repeats. Growth stops when it runs out of
+  // program, not room, so this is the control that fills the plot.
+  const [programRepeat, setProgramRepeat] = useState(2);
   // "branch" is the original cross-shaped growth; "site" enters from the
   // street and lays perimeter blocks on the grids the plot's edges give.
   const [strategy, setStrategy] = useState("branch");
@@ -128,7 +131,7 @@ export default function App() {
     setBusy(true);
     setError(null);
     try {
-      const req = { program, seed, per_room: perRoom, constrain_to_site: constrainToSite, strategy, branch_depth: subBranches ? 2 : 1 };
+      const req = { program, seed, per_room: perRoom, constrain_to_site: constrainToSite, strategy, branch_depth: subBranches ? 2 : 1, program_repeat: programRepeat };
       // The plan is deterministic in (program, seed), so asking the
       // frame endpoint twice returns two readings of the SAME building
       // -- the structural frame, and that frame with its walls filled.
@@ -147,7 +150,7 @@ export default function App() {
     } finally {
       setBusy(false);
     }
-  }, [program, seed, perRoom, jointBlocks, courseCm, align, constrainToSite, strategy, subBranches]);
+  }, [program, seed, perRoom, jointBlocks, courseCm, align, constrainToSite, strategy, subBranches, programRepeat]);
 
   useEffect(() => { if (catalog) regenerate(); }, [catalog, regenerate]);
 
@@ -243,8 +246,17 @@ export default function App() {
                 type="number"
                 value={seed}
                 onChange={(e) => setSeed(Number(e.target.value))}
-                style={{ width: 76 }}
+                style={{ width: 120 }}
               />
+            </label>
+            <label className="muted" style={{ display: "block", marginBottom: 8 }}>
+              program ×{" "}
+              <select className="field" value={programRepeat}
+                      onChange={(e) => setProgramRepeat(Number(e.target.value))}>
+                {[1, 2, 3, 4, 6].map((n) => (
+                  <option key={n} value={n}>{n}</option>
+                ))}
+              </select>
             </label>
             <p className="note" style={{ marginBottom: 10, fontSize: 11 }}>
               The seed only varies where each flexible space lands inside its size

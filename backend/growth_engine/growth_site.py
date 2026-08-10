@@ -52,9 +52,12 @@ import random
 from dataclasses import dataclass
 
 from .catalog import get_unit
-from .geometry import Point, polygon_area, polygon_contains, polygons_overlap
+from .geometry import (
+    Point, point_in_polygon, polygon_area, polygon_contains, polygons_overlap,
+)
 from .growth import (
     CORRIDOR_WIDTH_CM,
+    ENTRY_CORRIDOR_BAYS_CM,
     generate_floorplan,
     CORE_SIZE_CM,
     LEVEL_HEIGHT_CM,
@@ -92,6 +95,11 @@ STEP_CM = 90.0
 # literal, because 60 m2 is 600_000 cm2 and getting that wrong by a
 # factor of ten silently swallows every green area but the largest.
 MIN_GREEN_CM2 = 60.0 * 100.0 * 100.0
+
+# How much of a region's ground a clean convex shape must still cover to
+# be worth taking. Below this the simplification is costing more garden
+# than the tidier outline is worth, and the region is drawn as it is.
+MIN_HULL_KEEP = 0.40
 
 
 @dataclass
@@ -198,6 +206,7 @@ def generate_site_floorplan(program: list[str], site, seed: int | None = None,
                             inset_m: float = 6.0, entrance_edge: int = 1,
                             resolution_cm: float = 90.0,
                             max_levels: int = MAX_LEVELS,
+                            program_repeat: int = 1,
                             street_names=None) -> FloorPlan:
     """
     Grow a perimeter block on a real plot.
@@ -217,7 +226,11 @@ def generate_site_floorplan(program: list[str], site, seed: int | None = None,
     boundary = ctx.boundary
 
     outdoor_keys = [k for k in program if is_outdoor(k)]
-    built = [k for k in program if not is_outdoor(k)]
+    # Repeating the program is how the plot gets FILLED. One pass of an
+    # 18-entry brief uses about a quarter of this site; growth stops when
+    # it runs out of program, not when it runs out of room, so asking for
+    # more is the only way to see the site's real capacity.
+    built = [k for k in program if not is_outdoor(k)] * max(1, program_repeat)
 
     elements: list[PlacedElement] = []
     occupied: dict[int, list] = {}
@@ -365,6 +378,7 @@ def generate_spine_floorplan(program: list[str], site, seed: int | None = None,
                              grid_family: int | None = None,
                              max_branch_cm: float = 4000.0,
                              branch_depth: int = 2,
+                             program_repeat: int = 1,
                              street_names=None) -> FloorPlan:
     """
     The SPINE, turned onto a site grid.
@@ -480,7 +494,11 @@ def generate_spine_floorplan(program: list[str], site, seed: int | None = None,
         along += STEP_CM
         entrance = _entrance_at(along)
 
-    built = [k for k in program if not is_outdoor(k)]
+    # Repeating the program is how the plot gets FILLED. One pass of an
+    # 18-entry brief uses about a quarter of this site; growth stops when
+    # it runs out of program, not when it runs out of room, so asking for
+    # more is the only way to see the site's real capacity.
+    built = [k for k in program if not is_outdoor(k)] * max(1, program_repeat)
     outdoor_keys = [k for k in program if is_outdoor(k)] or ["Garden"]
 
     # max_branch_cm is much larger than the branch strategy's 1200. That
@@ -494,7 +512,12 @@ def generate_spine_floorplan(program: list[str], site, seed: int | None = None,
     plan = generate_floorplan(built, seed=seed, boundary=ctx.boundary,
                               entrance=entrance, axes=(u_ax, v_ax),
                               max_branch_cm=max_branch_cm,
-                              branch_depth=branch_depth)
+                              branch_depth=branch_depth,
+                              # A third of the way down the spine, so the
+                              # stair lands in the middle of what it
+                              # serves rather than at the far end of it.
+                              entry_run_cm=max(ENTRY_CORRIDOR_BAYS_CM,
+                                               length * 0.3))
 
     # Residual -> green. Appending is safe: outdoor elements build no
     # walls, so the resolved wall set and every existing element's
@@ -562,19 +585,28 @@ def _fill_residual(elements, occupied, ctx: SiteContext, keys, counts,
 
     order = 0
     for region in _regions(free):
-        loop = _trace_outline(region, ox, oy, resolution_cm)
-        if len(loop) < 3:
-            continue
-        if polygon_area(loop) < MIN_GREEN_CM2:
-            # Too small to be a garden -- it is a gap, and naming one
-            # would be generous.
-            continue
-        key = keys[order % len(keys)]
-        order += 1
-        _claim(occupied, 0, 1, loop)
-        elements.append(PlacedElement("outdoor", key, loop,
-                                      height_cm=OUTDOOR_HEIGHT_CM, level=0))
-        counts[key] = counts.get(key, 0) + 1
+        # ONE REGION, SEVERAL CLEAN PIECES.
+        #
+        # Drawing a region as a single polygon forces a choice between a
+        # shape that is clean and one that is true: on a dense plan the
+        # residual is a ribbon threading between buildings, and its
+        # honest outline runs to 150 corners while its convex hull covers
+        # half a block of housing.
+        #
+        # Neither is necessary. The region is cut into a few convex
+        # pieces instead -- the largest clean shape that fits, then the
+        # largest that fits what is left, and so on. Each is a garden you
+        # could set out with a tape, and together they keep the ground.
+        for piece in _convex_pieces(region, ox, oy, resolution_cm,
+                                    ctx.boundary):
+            if polygon_area(piece) < MIN_GREEN_CM2:
+                continue     # a gap, not a garden
+            key = keys[order % len(keys)]
+            order += 1
+            _claim(occupied, 0, 1, piece)
+            elements.append(PlacedElement("outdoor", key, piece,
+                                          height_cm=OUTDOOR_HEIGHT_CM, level=0))
+            counts[key] = counts.get(key, 0) + 1
 
 
 def _regions(free: dict) -> list[set]:
@@ -634,12 +666,187 @@ def _trace_outline(region: set, ox: float, oy: float, res: float) -> list[Point]
 
     pts = [Point(ox + i * res, oy + j * res) for i, j in loop]
 
-    # Collapse the staircase. Tracing a diagonal edge on a 90cm lattice
-    # gives a step at every cell -- one region came out with 322 corners,
-    # which is the raster, not the shape. Simplified to within one cell,
-    # a run of steps becomes the diagonal it was approximating, which is
-    # both what the ground actually is and what Adela drew.
-    return _simplify(pts, res)
+    return pts
+
+
+def _convex_pieces(region: set, ox: float, oy: float, res: float,
+                   boundary, max_pieces: int = 6) -> list[list[Point]]:
+    """Cover a region with a few clean convex shapes.
+
+    Greedy: take the best convex shape that fits, remove the cells it
+    covers, repeat on what is left. Capped, because past a handful of
+    pieces this stops being a set of gardens and becomes confetti -- the
+    remainder is then left undrawn rather than shattered.
+    """
+    out: list[list[Point]] = []
+    remaining = set(region)
+    for _ in range(max_pieces):
+        if len(remaining) < 4:
+            break
+        best = None
+        for sub in _regions({c: None for c in remaining}):
+            shape = _clean_shape(sub, ox, oy, res, boundary)
+            if len(shape) >= 3 and polygon_area(shape) > (
+                    0 if best is None else polygon_area(best)):
+                best = shape
+        if best is None or polygon_area(best) < MIN_GREEN_CM2:
+            break
+        out.append(best)
+        remaining = {c for c in remaining
+                     if not point_in_polygon(
+                         Point(ox + (c[0] + 0.5) * res,
+                               oy + (c[1] + 0.5) * res), best)}
+    return out
+
+
+def _clean_shape(region: set, ox: float, oy: float, res: float,
+                 boundary) -> list[Point]:
+    """A clean CONVEX shape for this region -- a trapezoid where the
+    ground allows one.
+
+    Tracing the region gives its true outline, which on a dense plan
+    means a 150-corner ribbon threading between buildings. That is
+    accurate and unreadable, and it is not what a garden is drawn as.
+
+    So the shape is the region's convex HULL instead, simplified to a
+    handful of corners. A hull can of course cover ground that belongs to
+    a building, so the region is ERODED -- shrunk by a ring of cells at a
+    time -- until its hull lands entirely on free ground. Open regions
+    keep almost all their area and come out as quadrilaterals; a region
+    threaded between buildings gives up area until what is left is a
+    shape you could actually lay out.
+
+    The trade is real and it is bounded. Eroding until a hull fits can
+    throw away most of the garden -- on one test it took 750 m2 of green
+    down to 300. So a hull is only accepted while it still holds
+    MIN_HULL_KEEP of the ground it stands on; past that the region is
+    better drawn as it really is. A clean shape is worth some area, not
+    half of it.
+    """
+    have = len(region) * res * res
+    for erosion in range(0, 5):
+        cells = _erode(region, erosion)
+        if len(cells) < 4:
+            break
+        pts = []
+        for (i, j) in cells:
+            for di, dj in ((0, 0), (1, 0), (1, 1), (0, 1)):
+                pts.append(Point(ox + (i + di) * res, oy + (j + dj) * res))
+        hull = _convex_hull(pts)
+        hull = _simplify(hull, res * 1.2)
+        if len(hull) < 3:
+            continue
+        if polygon_area(hull) < have * MIN_HULL_KEEP:
+            break                        # eroding costs more than it buys
+        if _on_free_ground(hull, region, ox, oy, res) and                 polygon_contains(hull, boundary):
+            return hull
+
+    # No hull fits -- this region is a ribbon threading between
+    # buildings, and its convex hull would cover half a block of housing.
+    # Fall back to the largest RECTANGLE that fits inside it: still a
+    # clean four-sided shape you could set out with a tape, never the
+    # 150-corner outline, and guaranteed to lie on free ground because it
+    # is built out of free cells rather than fitted around them.
+    return _largest_rect(region, ox, oy, res)
+
+
+def _largest_rect(region: set, ox: float, oy: float, res: float) -> list[Point]:
+    """Largest all-free rectangle inside the region, as a polygon.
+
+    Largest-rectangle-in-histogram row by row with a monotonic stack:
+    O(cells). The obvious nested version -- grow every width and height
+    from every cell -- is O(cells x w x h) and took seconds per call.
+    """
+    if not region:
+        return []
+    i_lo = min(i for i, _ in region)
+    i_hi = max(i for i, _ in region)
+    j_lo = min(j for _, j in region)
+    j_hi = max(j for _, j in region)
+    width = i_hi - i_lo + 1
+
+    heights = [0] * (width + 1)
+    best = None
+    for j in range(j_lo, j_hi + 1):
+        for k in range(width):
+            heights[k] = heights[k] + 1 if (i_lo + k, j) in region else 0
+        stack: list[int] = []
+        for k in range(width + 1):
+            while stack and heights[stack[-1]] >= heights[k]:
+                h = heights[stack.pop()]
+                left = stack[-1] + 1 if stack else 0
+                w = k - left
+                if h and w and (best is None or w * h > best[0]):
+                    # j is the BOTTOM row of the run, so the block starts
+                    # h-1 rows above it.
+                    best = (w * h, i_lo + left, j - h + 1, w, h)
+            stack.append(k)
+    if best is None:
+        return []
+    _a, i0, j0, w, h = best
+    x0, y0 = ox + i0 * res, oy + j0 * res
+    x1, y1 = x0 + w * res, y0 + h * res
+    return [Point(x0, y0), Point(x1, y0), Point(x1, y1), Point(x0, y1)]
+
+
+def _erode(region: set, rings: int) -> set:
+    """Drop `rings` layers of cells from the region's edge."""
+    out = set(region)
+    for _ in range(rings):
+        out = {(i, j) for (i, j) in out
+               if all((i + di, j + dj) in out
+                      for di, dj in ((1, 0), (-1, 0), (0, 1), (0, -1)))}
+        if not out:
+            break
+    return out
+
+
+def _convex_hull(pts: list[Point]) -> list[Point]:
+    """Andrew's monotone chain."""
+    uniq = sorted({(round(p.x, 3), round(p.y, 3)) for p in pts})
+    if len(uniq) < 3:
+        return [Point(x, y) for x, y in uniq]
+
+    def half(seq):
+        out: list[tuple] = []
+        for q in seq:
+            while len(out) >= 2:
+                (ax, ay), (bx, by) = out[-2], out[-1]
+                if (bx - ax) * (q[1] - ay) - (by - ay) * (q[0] - ax) <= 0:
+                    out.pop()
+                else:
+                    break
+            out.append(q)
+        return out
+
+    lower = half(uniq)
+    upper = half(list(reversed(uniq)))
+    return [Point(x, y) for x, y in lower[:-1] + upper[:-1]]
+
+
+def _on_free_ground(poly: list[Point], region: set, ox: float, oy: float,
+                    res: float) -> bool:
+    """Does this polygon cover only cells that belong to the region?
+
+    Sampled rather than solved. The polygon may be non-convex, so the
+    usual convex overlap test does not apply -- and this is the question
+    that actually matters: a simplified outline is acceptable exactly
+    when it has not swallowed ground that belongs to a building.
+    """
+    xs = [p.x for p in poly]
+    ys = [p.y for p in poly]
+    step = res / 2
+    y = min(ys) + step / 2
+    while y < max(ys):
+        x = min(xs) + step / 2
+        while x < max(xs):
+            if point_in_polygon(Point(x, y), poly):
+                cell = (int((x - ox) // res), int((y - oy) // res))
+                if cell not in region:
+                    return False
+            x += step
+        y += step
+    return True
 
 
 def _simplify(pts: list[Point], tol: float) -> list[Point]:

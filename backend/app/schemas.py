@@ -76,6 +76,10 @@ class PlanRequest(BaseModel):
     # that cross the arms again, which is what lets a plan reach past one
     # unit either side of a corridor. See growth._spawn_tertiary.
     branch_depth: int = 2
+    # How many times to repeat the program. One pass of an 18-entry brief
+    # uses about a quarter of this site; growth stops when it runs out of
+    # PROGRAM, not when it runs out of room, so this is what fills a plot.
+    program_repeat: int = 2
     # Setback from the street centrelines the boundary is measured on.
     site_inset_m: float = 6.0
 

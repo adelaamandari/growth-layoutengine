@@ -535,7 +535,8 @@ def generate_floorplan(program: list[str], seed: int | None = None,
                        entrance: Point | None = None,
                        axes: tuple[Point, Point] | None = None,
                        branch_depth: int = 1,
-                       tertiary_pitch_cm: float = 1200.0) -> FloorPlan:
+                       tertiary_pitch_cm: float = 1200.0,
+                       entry_run_cm: float = ENTRY_CORRIDOR_BAYS_CM) -> FloorPlan:
     """
     program: ordered list of type keys to place, e.g.
         ["Lobby", "Studio_A", "SK", "2Bed_A", "Gym", "Garden"]
@@ -591,7 +592,12 @@ def generate_floorplan(program: list[str], seed: int | None = None,
     u_ax, v_ax = axes if axes else (Point(1.0, 0.0), Point(0.0, 1.0))
     entrance = entrance if entrance is not None else Point(0, 0)
     entry_dir = Point(-v_ax.x, -v_ax.y)
-    core_pos = entrance + entry_dir.scaled(ENTRY_CORRIDOR_BAYS_CM)
+    # How far in the core sits. Two bays by default -- a front door and
+    # a stair right behind it. On a long plan that leaves the stair at
+    # one END of the building, so every unit is reached by walking the
+    # whole spine and the far ones only through everything before them;
+    # the site strategy pushes it into the body of the plan instead.
+    core_pos = entrance + entry_dir.scaled(entry_run_cm)
     # The entry run belongs to the ground floor only. Upper storeys
     # reach the branches through the core, which is the stair.
     _add_corridor(elements, occupied, entrance,
