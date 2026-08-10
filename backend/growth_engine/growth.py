@@ -536,7 +536,9 @@ def generate_floorplan(program: list[str], seed: int | None = None,
                        axes: tuple[Point, Point] | None = None,
                        branch_depth: int = 1,
                        tertiary_pitch_cm: float = 1200.0,
-                       entry_run_cm: float = ENTRY_CORRIDOR_BAYS_CM) -> FloorPlan:
+                       entry_run_cm: float = ENTRY_CORRIDOR_BAYS_CM,
+                       core_pitch_cm: float | None = None,
+                       reserved: list[list[Point]] | None = None) -> FloorPlan:
     """
     program: ordered list of type keys to place, e.g.
         ["Lobby", "Studio_A", "SK", "2Bed_A", "Gym", "Garden"]
@@ -582,6 +584,14 @@ def generate_floorplan(program: list[str], seed: int | None = None,
     # Occupancy is per level: a unit only has to clear what is actually
     # on its own storey.
     occupied: dict[int, list[list[Point]]] = {}
+
+    # COURTYARDS. Reserved before anything is placed, on EVERY storey --
+    # a courtyard open to the sky is not a hole in the ground floor with
+    # flats over it. Growth simply cannot see this ground, so the
+    # building forms around it rather than being cut out of afterwards.
+    for block in (reserved or []):
+        for lv in range(max_levels + 2):
+            occupied.setdefault(lv, []).append(block)
     unit_counts: dict[str, int] = {}
 
     # The frame the plan is laid out on. Defaults to the world axes with
@@ -628,6 +638,12 @@ def generate_floorplan(program: list[str], seed: int | None = None,
         runs = [(br, side) for br in branches for side in (-1, 1)]
         bi = 0
         placed_on_level = False
+        # Distance along each run since its last stair. One core at the
+        # centre means the far end of a long plan is reached only by
+        # walking everything between; a stair every `core_pitch_cm`
+        # bounds that walk. Keyed per run because the two sides of a
+        # corridor are served independently.
+        last_core: dict[tuple[int, int], float] = {}
 
         while qi < len(program) and iterations < max_iterations:
             iterations += 1
@@ -646,6 +662,32 @@ def generate_floorplan(program: list[str], seed: int | None = None,
                 depth = random.uniform(*spec.depth_cm)
             else:
                 length = unit.width_cm
+
+            # A stair wherever a run has gone `core_pitch_cm` without
+            # one. Placed as a bay ON the corridor edge, like a unit,
+            # rather than on the centreline: a core straddling the
+            # corridor would be overlapped by it when the corridor is
+            # emitted, and a stair you cannot walk past is a dead end.
+            if core_pitch_cm:
+                for br_c, side_c in runs:
+                    okey = "offset_l" if side_c == -1 else "offset_r"
+                    rkey = (id(br_c), side_c)
+                    if br_c[okey] - last_core.get(rkey, 0.0) < core_pitch_cm:
+                        continue
+                    a0 = br_c["start"] + br_c["dir"].scaled(br_c[okey])
+                    a1 = br_c["start"] + br_c["dir"].scaled(br_c[okey] + CORE_SIZE_CM)
+                    e0 = a0 + br_c["pd"].scaled(side_c * CORRIDOR_HALF)
+                    e1 = a1 + br_c["pd"].scaled(side_c * CORRIDOR_HALF)
+                    out_c = br_c["pd"].scaled(side_c)
+                    cc = _rect(e0, e1,
+                               e1 + out_c.scaled(CORE_SIZE_CM),
+                               e0 + out_c.scaled(CORE_SIZE_CM))
+                    if _on_site(cc, boundary) and _is_free(occupied, level, 1, cc):
+                        _reserve(occupied, level, 1, cc)
+                        elements.append(PlacedElement("core", "Core", cc,
+                                                      level=level))
+                        br_c[okey] += CORE_SIZE_CM
+                    last_core[rkey] = br_c[okey]
 
             placed = False
             for attempt in range(len(runs)):

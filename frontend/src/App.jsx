@@ -691,6 +691,24 @@ export default function App() {
                     footprint{plan.site_fit.fits ? ", so it fits" : ", so it overhangs"}.</>
                 )}
               </p>
+              {plan?.site_fit?.cores > 0 && (
+                <p className="note" style={{ marginTop: 10, fontSize: 11 }}>
+                  <b>Access and green.</b> <b>{plan.site_fit.cores}</b> stairs;
+                  the furthest room is <b>{fmt(plan.site_fit.max_to_core_m, 1)} m</b>{" "}
+                  from one, against a {plan.site_fit.limit_m} m target
+                  {plan.site_fit.rooms_over_limit > 0
+                    ? <> — <b>{plan.site_fit.rooms_over_limit}</b> of{" "}
+                        {plan.site_fit.rooms} rooms are over it on this seed</>
+                    : <> — all {plan.site_fit.rooms} rooms are within it</>}.
+                  Green is <b>{fmt(plan.site_fit.green_pct_of_ground, 1)}%</b> of the
+                  ground floor ({fmt(plan.site_fit.green_m2)} m² of{" "}
+                  {fmt(plan.site_fit.ground_m2)} m² built), against a 30–40% target.
+                  Both are design targets rather than invariants, so they are
+                  measured per seed rather than enforced — Randomize until one
+                  lands, or change <b>program ×</b> to trade floor area for green.
+                </p>
+              )}
+
               {plan?.site_fit && (
                 <p className="note" style={{ marginTop: 8, fontSize: 11 }}>
                   {plan.site_fit.constrained

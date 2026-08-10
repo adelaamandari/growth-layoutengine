@@ -44,7 +44,9 @@ from growth_engine.site.location import DEFAULT_SITE, site_fit
 from growth_engine.site.location import _area as _poly_area
 from growth_engine.preview import render_svg
 
-from growth_engine.diagnostics import shared_boundaries, verify_walls, wall_length
+from growth_engine.diagnostics import (
+    access_report, shared_boundaries, verify_walls, wall_length,
+)
 from growth_engine.geometry import polygon_area as _poly_area_pts
 
 from .schemas import (
@@ -317,6 +319,9 @@ def plan(req: PlanRequest) -> PlanResponse:
             # the core are laid down before any test can run. Empty is
             # the expected answer, not a guaranteed one.
             "off_site": fp.off_site,
+            # Adela's two design targets: a 20m walk to a stair, and
+            # 30-40% of the ground floor green. Measured, not asserted.
+            **access_report(fp),
         },
         level_count=fp.level_count,
         stats={

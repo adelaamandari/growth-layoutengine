@@ -169,3 +169,54 @@ def verify_walls(plan, tol_cm: float = 1.0) -> dict:
         "all_walls_referenced": referenced == all_ids,
         "orphan_wall_ids": sorted(all_ids - referenced),
     }
+
+
+def access_report(plan, limit_cm: float = 2000.0) -> dict:
+    """How far a unit is from its nearest stair, and how much of the
+    ground is green.
+
+    Both are DESIGN TARGETS rather than invariants -- Adela's brief is a
+    20m walk to a core and 30-40% of the ground floor green -- so they
+    are measured and reported rather than asserted. A seed that misses
+    should be visible, not silently accepted or silently rejected.
+
+    Distance is straight-line between centroids, which understates a real
+    walk: it does not follow the corridor. Read it as a lower bound.
+    """
+    from .geometry import polygon_area
+
+    def centre(el):
+        n = len(el.corners)
+        return (sum(c.x for c in el.corners) / n, sum(c.y for c in el.corners) / n)
+
+    cores = [e for e in plan.elements if e.kind == "core"]
+    rooms = [e for e in plan.elements if e.kind in ("unit", "communal")]
+
+    worst = 0.0
+    over = 0
+    for r in rooms:
+        here = [c for c in cores if c.level == r.level] or cores
+        if not here:
+            continue
+        rx, ry = centre(r)
+        d = min(((rx - cx) ** 2 + (ry - cy) ** 2) ** 0.5
+                for cx, cy in (centre(c) for c in here))
+        worst = max(worst, d)
+        if d > limit_cm:
+            over += 1
+
+    ground = sum(polygon_area(e.corners) for e in plan.elements
+                 if e.level == 0 and e.kind != "outdoor")
+    green = sum(polygon_area(e.corners) for e in plan.elements
+                if e.kind == "outdoor")
+    return {
+        "cores": len(cores),
+        "max_to_core_m": round(worst / 100, 1),
+        "limit_m": limit_cm / 100,
+        "rooms_over_limit": over,
+        "rooms": len(rooms),
+        "within_limit": over == 0,
+        "ground_m2": round(ground / 10000, 0),
+        "green_m2": round(green / 10000, 0),
+        "green_pct_of_ground": (round(100 * green / ground, 1) if ground else 0.0),
+    }

@@ -101,6 +101,24 @@ MIN_GREEN_CM2 = 60.0 * 100.0 * 100.0
 # than the tidier outline is worth, and the region is drawn as it is.
 MIN_HULL_KEEP = 0.40
 
+# A garden needs WIDTH, not just area. The largest-area rectangle inside
+# a ribbon is a long thin verge -- 27m x 3m cleared the 60m2 floor and
+# drew as a line against the site edge. Effective width is area divided
+# by longest extent, which is orientation-independent and so works for
+# the rotated hulls as well as the axis-aligned rectangles.
+MIN_GREEN_WIDTH_CM = 500.0
+
+
+def _too_thin(poly) -> bool:
+    if len(poly) < 3:
+        return True
+    xs = [p.x for p in poly]
+    ys = [p.y for p in poly]
+    longest = max(max(xs) - min(xs), max(ys) - min(ys))
+    if longest <= 0:
+        return True
+    return polygon_area(poly) / longest < MIN_GREEN_WIDTH_CM
+
 
 @dataclass
 class SiteContext:
@@ -379,6 +397,8 @@ def generate_spine_floorplan(program: list[str], site, seed: int | None = None,
                              max_branch_cm: float = 4000.0,
                              branch_depth: int = 2,
                              program_repeat: int = 1,
+                             core_pitch_cm: float = 800.0,
+                             courtyard_ratio: float = 0.16,
                              street_names=None) -> FloorPlan:
     """
     The SPINE, turned onto a site grid.
@@ -509,8 +529,17 @@ def generate_spine_floorplan(program: list[str], site, seed: int | None = None,
     # or three, because it hit the cap long before it hit the boundary.
     # branch_depth 2 by default here: the tertiary runs are what make a
     # spine on a deep plot reach past one unit either side of its arms.
+    # COURTYARDS, reserved before growth rather than carved out after.
+    # Filling the plot solid and then calling the leftover "green" gives
+    # a perimeter of scraps; a courtyard has to be decided first and
+    # built around. Sized as a share of the developable area, laid on the
+    # plan's own axes so they sit square to the building.
+    courtyards = _courtyards(ctx, u_ax, v_ax, entrance, courtyard_ratio)
+
     plan = generate_floorplan(built, seed=seed, boundary=ctx.boundary,
                               entrance=entrance, axes=(u_ax, v_ax),
+                              core_pitch_cm=core_pitch_cm,
+                              reserved=courtyards,
                               max_branch_cm=max_branch_cm,
                               branch_depth=branch_depth,
                               # A third of the way down the spine, so the
@@ -527,6 +556,20 @@ def generate_spine_floorplan(program: list[str], site, seed: int | None = None,
     for el in plan.elements:
         for lv in range(el.level, el.level + el.floors):
             occupied.setdefault(lv, []).append(el.corners)
+
+    # The courtyards were reserved so growth would build around them;
+    # they still have to be DRAWN. Reserving alone put them in
+    # `occupied`, which meant the residual pass saw their ground as taken
+    # and skipped it -- the courts existed as holes in the plan and as
+    # nothing at all in the green total.
+    for k, block in enumerate(courtyards):
+        key = outdoor_keys[k % len(outdoor_keys)]
+        plan.elements.append(PlacedElement("outdoor", key, block,
+                                           height_cm=OUTDOOR_HEIGHT_CM,
+                                           level=0))
+        plan.unit_counts[key] = plan.unit_counts.get(key, 0) + 1
+        occupied.setdefault(0, []).append(block)
+
     _fill_residual(plan.elements, occupied, ctx, outdoor_keys,
                    plan.unit_counts, resolution_cm)
     _assign_growth_steps(plan.elements)
@@ -599,8 +642,8 @@ def _fill_residual(elements, occupied, ctx: SiteContext, keys, counts,
         # could set out with a tape, and together they keep the ground.
         for piece in _convex_pieces(region, ox, oy, resolution_cm,
                                     ctx.boundary):
-            if polygon_area(piece) < MIN_GREEN_CM2:
-                continue     # a gap, not a garden
+            if polygon_area(piece) < MIN_GREEN_CM2 or _too_thin(piece):
+                continue     # a gap or a verge, not a garden
             key = keys[order % len(keys)]
             order += 1
             _claim(occupied, 0, 1, piece)
@@ -669,6 +712,45 @@ def _trace_outline(region: set, ox: float, oy: float, res: float) -> list[Point]
     return pts
 
 
+def _courtyards(ctx: SiteContext, u: Point, v: Point, entrance: Point,
+                ratio: float) -> list[list[Point]]:
+    """A few open blocks in the body of the plot, reserved before growth.
+
+    Placed along the spine and to either side of it, on the plan's own
+    axes so they read as courtyards rather than as gaps. Only those that
+    land wholly inside the boundary are kept, so the acute end of a
+    triangle simply does not get one.
+    """
+    area = polygon_area(ctx.boundary)
+    if ratio <= 0 or area <= 0:
+        return []
+    target = area * ratio
+    # Two or three courts rather than one big void: a single block that
+    # size would cut the plan in half.
+    count = 3
+    side = math.sqrt(target / count)
+    side = max(1200.0, min(side, 2600.0))
+
+    out = []
+    for k in range(count):
+        along = (k + 1) * (side * 2.2)
+        for across in (-1.0, 1.0):
+            c = Point(entrance.x - v.x * along + u.x * across * side * 1.15,
+                      entrance.y - v.y * along + u.y * across * side * 1.15)
+            half = side / 2
+            block = [
+                Point(c.x - u.x * half - v.x * half, c.y - u.y * half - v.y * half),
+                Point(c.x + u.x * half - v.x * half, c.y + u.y * half - v.y * half),
+                Point(c.x + u.x * half + v.x * half, c.y + u.y * half + v.y * half),
+                Point(c.x - u.x * half + v.x * half, c.y - u.y * half + v.y * half),
+            ]
+            if polygon_contains(block, ctx.boundary):
+                out.append(block)
+        if len(out) >= count:
+            break
+    return out[:count]
+
+
 def _convex_pieces(region: set, ox: float, oy: float, res: float,
                    boundary, max_pieces: int = 6) -> list[list[Point]]:
     """Cover a region with a few clean convex shapes.
@@ -689,7 +771,7 @@ def _convex_pieces(region: set, ox: float, oy: float, res: float,
             if len(shape) >= 3 and polygon_area(shape) > (
                     0 if best is None else polygon_area(best)):
                 best = shape
-        if best is None or polygon_area(best) < MIN_GREEN_CM2:
+        if best is None or polygon_area(best) < MIN_GREEN_CM2                 or _too_thin(best):
             break
         out.append(best)
         remaining = {c for c in remaining
