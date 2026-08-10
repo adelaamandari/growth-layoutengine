@@ -75,9 +75,16 @@ CORRIDOR_HALF = CORRIDOR_WIDTH_CM / 2
 # smallest gap worth trying to fill. Both in cm.
 STEP_CM = 90.0
 
-# A band is abandoned once this many consecutive bays fail -- it has run
-# off the end of the frontage or into the neighbouring band.
-MAX_BAND_MISSES = 6
+# A band walks its WHOLE frontage. There used to be a miss counter here
+# that abandoned a band after six failed bays, and it was quietly wrong:
+# an acute corner has to be walked past before the plot is deep enough
+# for anything, and on this triangle the Coffey frontage does not admit
+# its first bay until 12.6 m in -- fourteen probes. The band gave up at
+# 5.4 m and that whole elevation stayed empty, which read as a layout
+# choice rather than a constant that was too small.
+#
+# No counter is needed: `offset` only increases and is bounded by the
+# frontage length, so the walk terminates on its own.
 
 # Smallest leftover worth calling a garden. 60 m2, in cm2 because that is
 # what the engine measures in -- and written as a product rather than a
@@ -250,16 +257,23 @@ def generate_site_floorplan(program: list[str], site, seed: int | None = None,
                      None, ent_u, ent_n, CORE_SIZE_CM, CORE_SIZE_CM)
         _place(elements, occupied, boundary, "core", "Core", core, level)
 
+        # All frontages grow TOGETHER, one bay each in turn, rather than
+        # the first band running until the program is exhausted. Taking
+        # them one at a time gave the entrance frontage everything and
+        # left the others bare, which is not a perimeter block -- it is
+        # one terrace and two empty streets.
+        bands = [{"edge": e, "offset": 0.0, "t0": None, "t1": 0.0, "done": False}
+                 for e in _frontages(ctx, entrance_edge)]
         placed_here = False
-        for edge in _frontages(ctx, entrance_edge):
-            if qi >= len(built):
-                break
-            a, u, nrm, length = _edge_frame(ctx, edge)
-            misses = 0
-            offset = 0.0
-            reach_start = offset
 
-            while qi < len(built) and offset < length and misses < MAX_BAND_MISSES:
+        while qi < len(built) and any(not b["done"] for b in bands):
+            for band in bands:
+                if qi >= len(built):
+                    break
+                if band["done"]:
+                    continue
+
+                a, u, nrm, length = _edge_frame(ctx, band["edge"])
                 key = built[qi]
                 residential = key in RESIDENTIAL_KEYS
 
@@ -271,24 +285,33 @@ def generate_site_floorplan(program: list[str], site, seed: int | None = None,
                     w = random.uniform(*spec.frontage_cm)
                     d = min(band_depth, random.uniform(*spec.depth_cm))
                     h = LEVEL_HEIGHT_CM
-
-                start = Point(a.x + u.x * offset, a.y + u.y * offset)
-                corners = _rect(start, None, u, nrm, w, d)
                 kind = "unit" if residential else "communal"
 
-                if _place(elements, occupied, boundary, kind, key, corners,
-                          level, height_cm=h):
-                    counts[key] = counts.get(key, 0) + 1
-                    qi += 1
-                    offset += w
-                    placed_here = True
-                    misses = 0
-                else:
+                # Walk the rest of this frontage looking for a bay. The
+                # walk is bounded by the frontage itself; nothing else
+                # needs to stop it.
+                offset = band["offset"]
+                placed = False
+                while offset + w <= length:
+                    start = Point(a.x + u.x * offset, a.y + u.y * offset)
+                    corners = _rect(start, None, u, nrm, w, d)
+                    if _place(elements, occupied, boundary, kind, key,
+                              corners, level, height_cm=h):
+                        counts[key] = counts.get(key, 0) + 1
+                        qi += 1
+                        band["offset"] = offset + w
+                        band["t0"] = offset if band["t0"] is None else band["t0"]
+                        band["t1"] = offset + w
+                        placed = placed_here = True
+                        break
                     offset += STEP_CM
-                    misses += 1
 
-            if offset > reach_start:
-                corridors.append((edge, level, reach_start, offset))
+                if not placed:
+                    band["done"] = True
+
+        for band in bands:
+            if band["t0"] is not None:
+                corridors.append((band["edge"], level, band["t0"], band["t1"]))
 
         if placed_here:
             empty_streak = 0
