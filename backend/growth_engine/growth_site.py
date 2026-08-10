@@ -398,41 +398,86 @@ def generate_spine_floorplan(program: list[str], site, seed: int | None = None,
 
     ctx = build_context(site, inset_m, street_names)
 
+    # THE SPINE RUNS ALONG THE LONGEST EDGE, NOT INTO THE SITE.
+    #
+    # It used to enter perpendicular to a frontage, which on this plot
+    # meant driving across the SHORT edge -- 62.9 m of Deptford Church
+    # Street -- and hitting the far boundary almost immediately. The
+    # branches had nowhere to run, so the program stacked instead of
+    # spreading: 654 m2 of ground over three storeys where the plot
+    # comfortably holds more on one or two.
+    #
+    # Running the spine along the longest edge uses the triangle's
+    # LENGTH. The two side arms then reach across its width, which is
+    # the wide direction, and the plan spreads the way the plot is
+    # actually shaped.
     if grid_family is None:
-        weights = [f.support_m for f in ctx.families]
-        total = sum(weights)
-        pick = random.random() * total
-        grid_family = 0
-        for i, w in enumerate(weights):
-            pick -= w
-            if pick <= 0:
-                grid_family = i
-                break
-    fam = ctx.families[min(grid_family, len(ctx.families) - 1)]
+        # THE LONGEST EDGE, deterministically -- `extract_axes` returns
+        # them longest first. Not the biggest grid FAMILY: Coffey and
+        # Deptford Church sum to more support between them, but neither
+        # is as long as Crossfield on its own, and a spine needs one
+        # continuous run. Summed support is the wrong measure here.
+        #
+        # Deliberately not a weighted draw either. The longest edge is
+        # the plot's own long axis and that is the whole point of running
+        # the spine along it; letting a seed sometimes pick a shorter one
+        # just produces the cramped plan this was meant to fix. Variety
+        # comes from which END the entrance takes and where along it,
+        # which changes the plan without giving up the long axis.
+        spine_axis = ctx.axes[0]
+    else:
+        fam = ctx.families[min(grid_family, len(ctx.families) - 1)]
+        spine_axis = fam.axes[0]
 
-    # The plan's own axes. v is the direction the entry run comes DOWN
-    # from, so it must point INTO the site from the entrance frontage,
-    # not merely along the family -- otherwise the spine drives straight
-    # out through the street it just entered from.
-    ux, uy = fam.u
-    a, edge_u, edge_n, length = _edge_frame(ctx, entrance_edge)
-    u_ax = Point(ux, uy)
-    v_ax = Point(-uy, ux)
-    # growth.py takes entry_dir = -v, so -v is what has to point INTO the
-    # plot: dot(-v, inward normal) > 0, i.e. dot(v, n) < 0. ONE condition.
-    # Getting this wrong drives the spine straight back out through the
-    # street it just entered from, and every core lands off the site.
-    if edge_n.x * v_ax.x + edge_n.y * v_ax.y > 0:
-        v_ax = Point(-v_ax.x, -v_ax.y)
+    spine_edge = spine_axis.edge_index
+    a, edge_u, edge_n, length = _edge_frame(ctx, spine_edge)
 
-    t = length * (0.2 + 0.6 * random.random())
-    # Stood off the frontage line. The entrance is ON the boundary by
-    # definition, and the entry run and core are placed before any
-    # containment test can reject them -- starting exactly on the line
-    # puts half the armature over it.
-    setback = CORRIDOR_WIDTH_CM
-    entrance = Point(a.x + edge_u.x * t + edge_n.x * setback,
-                     a.y + edge_u.y * t + edge_n.y * setback)
+    # Which end to start from. Both ends give genuinely different plans
+    # on a triangle, because one is the acute corner.
+    from_start = random.random() < 0.5
+    run = edge_u if from_start else Point(-edge_u.x, -edge_u.y)
+
+    # growth.py runs its entry corridor along -v, so v is the reverse of
+    # the spine, and u -- the direction the side arms take -- is across
+    # the plot.
+    v_ax = Point(-run.x, -run.y)
+    u_ax = Point(-v_ax.y, v_ax.x)
+
+    # Stood off the edge far enough that units can hang on the STREET
+    # side of the spine as well as the inward side. growth.py loads both
+    # sides of every run, and a spine hard against the boundary wastes
+    # one of them.
+    setback = max(d for d in
+                  [get_unit(k).depth_cm for k in program
+                   if k in RESIDENTIAL_KEYS] or [600.0]) + CORRIDOR_HALF
+    base = a if from_start else Point(a.x + edge_u.x * length,
+                                      a.y + edge_u.y * length)
+
+    def _entrance_at(d: float) -> Point:
+        return Point(base.x + run.x * d + edge_n.x * setback,
+                     base.y + run.y * d + edge_n.y * setback)
+
+    def _inside(p: Point) -> bool:
+        # A box the width of the entry corridor, since that is what has
+        # to fit -- testing the bare point would put the door inside and
+        # the corridor through the boundary.
+        h = CORRIDOR_HALF
+        return polygon_contains(
+            [Point(p.x - h, p.y - h), Point(p.x + h, p.y - h),
+             Point(p.x + h, p.y + h), Point(p.x - h, p.y + h)],
+            ctx.boundary)
+
+    # Walk along the edge until the setback point is actually ON the
+    # plot. Near an acute corner the plot is narrower than the setback,
+    # so offsetting inward crosses straight out through the far edge --
+    # the entrance, the entry run and every core stacked above it then
+    # land outside, and nothing downstream can reject them because the
+    # armature is placed before any containment test runs.
+    along = length * (0.10 + 0.15 * random.random())
+    entrance = _entrance_at(along)
+    while not _inside(entrance) and along < length:
+        along += STEP_CM
+        entrance = _entrance_at(along)
 
     built = [k for k in program if not is_outdoor(k)]
     outdoor_keys = [k for k in program if is_outdoor(k)] or ["Garden"]
