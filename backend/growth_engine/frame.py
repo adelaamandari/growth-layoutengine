@@ -83,7 +83,7 @@ from dataclasses import dataclass, field
 from math import atan2, hypot
 
 from .components import BAY_CM, BAY_LENGTHS, BAY_NAMES
-from .geometry import Point
+from .geometry import Point, point_in_polygon
 from .glb_import import load_catalog
 from .growth import FloorPlan, builds_walls
 from .massing import generate_room_massing
@@ -315,26 +315,33 @@ def _boxes(plan: FloorPlan) -> list[tuple[int, float, float, float, float, float
     for el in plan.elements:
         if not builds_walls(el):
             continue
-        xs = [c.x for c in el.corners]
-        ys = [c.y for c in el.corners]
         z0 = getattr(el, "z0", 0.0)
-        out.append((el.level, min(xs), min(ys), max(xs), max(ys),
-                    z0, z0 + el.height_cm))
+        # The REAL footprint, not its bounding box. These used to be
+        # axis-aligned min/max, which was exact while every element was
+        # square to the page and silently wrong once the plan could turn
+        # onto a site grid -- a unit at 58 degrees has a bounding box
+        # about 1.9x its area, so columns stood in ground the building
+        # does not occupy and decks covered rooms that are not there.
+        out.append((el.level, list(el.corners), z0, z0 + el.height_cm))
     return out
 
 
-def _inside(x: float, y: float, box) -> bool:
-    _lv, x0, y0, x1, y1, _z0, _z1 = box
-    return (x0 - GRID_TOL_CM <= x <= x1 + GRID_TOL_CM
-            and y0 - GRID_TOL_CM <= y <= y1 + GRID_TOL_CM)
-
-
 def _dist_to_box(x: float, y: float, box) -> float:
-    """Distance from a point to an element's footprint, 0 if inside."""
-    _lv, x0, y0, x1, y1, _z0, _z1 = box
-    dx = max(x0 - x, 0.0, x - x1)
-    dy = max(y0 - y, 0.0, y - y1)
-    return (dx * dx + dy * dy) ** 0.5
+    """Distance from a point to an element's footprint, 0 if inside.
+
+    Exact for any convex footprint: inside is inside, and outside is the
+    nearest edge. Works unchanged for a rotated rectangle, which the
+    min/max version did not."""
+    poly = box[1]
+    p = Point(x, y)
+    if point_in_polygon(p, poly):
+        return 0.0
+    n = len(poly)
+    return min(_seg_distance(p, poly[i], poly[(i + 1) % n]) for i in range(n))
+
+
+def _inside(x: float, y: float, box) -> bool:
+    return _dist_to_box(x, y, box) <= GRID_TOL_CM
 
 
 def _at_massing(x: float, y: float, boxes, margin: float = GRID_TOL_CM) -> bool:
@@ -473,10 +480,8 @@ def _touches_bays(x: float, y: float, box) -> bool:
     """Does this element reach into any of the four bays meeting at the
     grid node? That is the region a node's column actually carries --
     one bay in each direction -- so it is what decides how tall the
-    column has to be."""
-    _lv, x0, y0, x1, y1, _z0, _z1 = box
-    return (x0 - GRID_CM - GRID_TOL_CM <= x <= x1 + GRID_CM + GRID_TOL_CM
-            and y0 - GRID_CM - GRID_TOL_CM <= y <= y1 + GRID_CM + GRID_TOL_CM)
+    column has to be. Measured from the real footprint."""
+    return _dist_to_box(x, y, box) <= GRID_CM + GRID_TOL_CM
 
 
 def build_frame(plan: FloorPlan, joint_blocks: bool = False,
@@ -507,10 +512,27 @@ def build_frame(plan: FloorPlan, joint_blocks: bool = False,
     # of the whole plan, so the grid is a property of the building
     # rather than of its bounding box.
     ox, oy = plan.entrance.x, plan.entrance.y
-    min_x = min(b[1] for b in boxes)
-    min_y = min(b[2] for b in boxes)
-    max_x = max(b[3] for b in boxes)
-    max_y = max(b[4] for b in boxes)
+
+    # The grid turns WITH the plan. It used to march in world x and y,
+    # which was the same thing while every building was square to the
+    # page -- and wrong the moment a plan could be laid out on a site
+    # grid, because the columns then crossed every wall they were meant
+    # to stand in at 58 degrees. Node (i, j) is i bays along u and j
+    # along v, u and v being the axes growth.py actually built on.
+    u_ax, v_ax = getattr(plan, "axes", (Point(1.0, 0.0), Point(0.0, 1.0)))
+
+    def _node_xy(i: int, j: int) -> tuple[float, float]:
+        return (ox + (i * u_ax.x + j * v_ax.x) * GRID_CM,
+                oy + (i * u_ax.y + j * v_ax.y) * GRID_CM)
+
+    # Extent measured in the plan's OWN frame, by projecting every corner
+    # onto u and v -- a world bounding box would be the wrong shape to
+    # iterate for a rotated building.
+    corners = [c for b in boxes for c in b[1]]
+    us = [(c.x - ox) * u_ax.x + (c.y - oy) * u_ax.y for c in corners]
+    vs = [(c.x - ox) * v_ax.x + (c.y - oy) * v_ax.y for c in corners]
+    min_x, max_x = min(us), max(us)
+    min_y, max_y = min(vs), max(vs)
 
     def _span(lo, hi, origin):
         i0 = int((lo - origin) // GRID_CM)
@@ -531,15 +553,14 @@ def build_frame(plan: FloorPlan, joint_blocks: bool = False,
     # four bays meeting at the node has floor in them, so the top of the
     # highest one is where the column ends.
     cells: dict[tuple[int, int], dict] = {}
-    for i in _span(min_x, max_x, ox):
-        for j in _span(min_y, max_y, oy):
-            x = ox + i * GRID_CM
-            y = oy + j * GRID_CM
+    for i in _span(min_x, max_x, 0.0):
+        for j in _span(min_y, max_y, 0.0):
+            x, y = _node_xy(i, j)
             if not _at_massing(x, y, boxes):
                 continue          # past the edge of the volume
             near = [b for b in boxes if _touches_bays(x, y, b)]
             levels = set()
-            for _lv, _x0, _y0, _x1, _y1, z0, z1 in near:
+            for _lv, _poly, z0, z1 in near:
                 # The same rule the decks use, so a column and the floors
                 # it carries can never disagree about which storeys the
                 # element occupies -- including the duplexes, which are
@@ -786,19 +807,25 @@ def build_frame(plan: FloorPlan, joint_blocks: bool = False,
     for el in plan.elements:
         if not builds_walls(el):
             continue  # open ground takes no deck and no ceiling
-        xs = [c.x for c in el.corners]
-        ys = [c.y for c in el.corners]
-        cx, cy = (min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2
+        # The deck is the element's OWN rectangle, turned with it. Taking
+        # min/max gave the bounding box, which on a rotated unit is about
+        # 1.9x the area -- so every deck and ceiling overhung its room and
+        # ran through its neighbours.
+        c0, c1, _c2, c3 = el.corners[0], el.corners[1], el.corners[2], el.corners[3]
+        cx = sum(c.x for c in el.corners) / len(el.corners)
+        cy = sum(c.y for c in el.corners) / len(el.corners)
         z0 = getattr(el, "z0", 0.0)
         depth = _nearest_depth(cx, cy)
-        sx, sy = max(xs) - min(xs), max(ys) - min(ys)
+        sx = hypot(c1.x - c0.x, c1.y - c0.y)
+        sy = hypot(c3.x - c0.x, c3.y - c0.y)
+        deck_angle = atan2(c1.y - c0.y, c1.x - c0.x)
         for storey in _spanned_storeys(z0, z0 + el.height_cm):
             z = storey * STOREY_CM
             members.append(FrameMember(
                 kind="floor", component="Deck",
                 cx=cx, cy=cy, cz=z + FLOOR_CM / 2,
                 sx=sx, sy=sy, sz=FLOOR_CM,
-                angle=0.0, node_id=-1,
+                angle=deck_angle, node_id=-1,
                 growth_step=_step(depth, z, PHASE_FLOOR),
             ))
             # The ceiling caps the SAME storey, so it arrives in the
@@ -811,7 +838,7 @@ def build_frame(plan: FloorPlan, joint_blocks: bool = False,
                 cx=cx, cy=cy,
                 cz=z + STOREY_CM - CATALOG["N"]["thickness_cm"] - CEILING_CM / 2,
                 sx=sx, sy=sy, sz=CEILING_CM,
-                angle=0.0, node_id=-1,
+                angle=deck_angle, node_id=-1,
                 growth_step=_step(depth, z, PHASE_FLOOR),
             ))
 

@@ -181,6 +181,11 @@ class FloorPlan:
     # than assumed.
     boundary: list[Point] | None = None
     off_site: list[str] = field(default_factory=list)
+    # The frame the plan was laid out on, (u, v). frame.py needs it: the
+    # structural grid has to turn with the building, or its columns march
+    # across a rotated plan at an angle to every wall they are meant to
+    # stand in.
+    axes: tuple[Point, Point] = (Point(1.0, 0.0), Point(0.0, 1.0))
 
 
 def _rect(p1: Point, p2: Point, p3: Point, p4: Point) -> list[Point]:
@@ -720,4 +725,5 @@ def generate_floorplan(program: list[str], seed: int | None = None,
                      dropped_wall_count=dropped_count,
                      level_count=max((el.level + el.floors for el in elements),
                                      default=1),
-                     boundary=boundary, off_site=off_site)
+                     boundary=boundary, off_site=off_site,
+                     axes=(u_ax, v_ax))
