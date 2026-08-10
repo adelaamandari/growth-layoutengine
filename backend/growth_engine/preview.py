@@ -51,13 +51,21 @@ NODE_FILL = "#fcfcfb"
 
 # Element fills: recessive warm neutrals. These must NOT compete with
 # the component colours -- they are context, not data.
+#
+# Outdoor is the one exception, and deliberately so: it is the only fill
+# carrying a categorical distinction rather than a shade of "interior",
+# so it reads green. It is desaturated well below the SC aqua (#1baf7a)
+# it sits nearest, so it stays background against the components while
+# still being unmistakably not-a-room.
 KIND_FILL = {
     "corridor": "#e8e6df",
     "core": "#d6d2c6",
     "unit": "#faf9f5",
     "communal": "#f0ece1",
+    "outdoor": "#dfeacd",
 }
 KIND_EDGE = "rgba(11,11,11,0.10)"
+OUTDOOR_EDGE = "rgba(74,110,52,0.45)"
 
 SURFACE = "#fcfcfb"
 INK_PRIMARY = "#0b0b0b"
@@ -139,7 +147,11 @@ def render_svg(plan: FloorPlan, out_width_px: float = 1700.0,
     for el in plan.elements:
         pts = " ".join(f"{a:.1f},{b:.1f}" for a, b in (px(c.x, c.y) for c in el.corners))
         fill = KIND_FILL.get(el.kind, "#eeeeee")
-        add(f'<polygon points="{pts}" fill="{fill}" stroke="{KIND_EDGE}" stroke-width="1"/>')
+        # An outdoor area has no wall components drawn on it, so its own
+        # outline is the only edge it gets -- it carries the weight the
+        # SA/SB/SC strokes carry on a room.
+        edge = OUTDOOR_EDGE if el.kind == "outdoor" else KIND_EDGE
+        add(f'<polygon points="{pts}" fill="{fill}" stroke="{edge}" stroke-width="1"/>')
     add('</g>')
 
     # --- real room subdivisions ------------------------------------

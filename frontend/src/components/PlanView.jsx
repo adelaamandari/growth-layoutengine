@@ -15,7 +15,7 @@ const fmt = (v, d = 1) =>
 // one above, the way a maisonette's upper part is drawn.
 const floorsOf = (el) => Math.max(1, Math.round((el.height_cm ?? 300) / 300));
 
-export default function PlanView({ plan, layers, level = 0 }) {
+export default function PlanView({ plan, layers, level = 0, site = null }) {
   const svgRef = useRef(null);
   const wrapRef = useRef(null);
   const [tip, setTip] = useState(null);
@@ -49,10 +49,19 @@ export default function PlanView({ plan, layers, level = 0 }) {
   // y is negated on the way out and north stays up.
   const home = useMemo(() => {
     if (!plan) return null;
-    const [minX, minY, maxX, maxY] = plan.extent_cm;
+    let [minX, minY, maxX, maxY] = plan.extent_cm;
+    // Frame the SITE too when it is shown, or the building fills the
+    // view and the plot it stands on is off screen — which is the one
+    // thing drawing the boundary is meant to answer.
+    if (site && layers.site) {
+      for (const [x, y] of site.centreline_cm) {
+        minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+        minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+      }
+    }
     const pad = Math.max(maxX - minX, maxY - minY) * 0.04;
     return { x: minX - pad, y: -maxY - pad, w: maxX - minX + pad * 2, h: maxY - minY + pad * 2 };
-  }, [plan]);
+  }, [plan, site, layers.site]);
 
   useEffect(() => { if (home) setView({ ...home }); }, [home]);
 
@@ -122,6 +131,31 @@ export default function PlanView({ plan, layers, level = 0 }) {
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
       >
+        {/* The site, under everything. Two outlines: the street
+            centrelines OSM actually gives, and the developable boundary
+            after the setback — the building has to sit inside the
+            second, not the first. */}
+        {layers.site && site && (
+          <g>
+            <polygon
+              points={site.centreline_cm.map((p) => `${p[0]},${-p[1]}`).join(" ")}
+              fill="var(--fill-outdoor)" fillOpacity="0.18"
+              stroke="var(--outdoor-line)" strokeWidth="1"
+              strokeOpacity="0.5" strokeDasharray="8 6"
+              vectorEffect="non-scaling-stroke"
+            >
+              <title>{site.address} — {site.area_m2} m² to street centrelines</title>
+            </polygon>
+            <polygon
+              points={site.boundary_cm.map((p) => `${p[0]},${-p[1]}`).join(" ")}
+              fill="none" stroke="var(--outdoor-line)" strokeWidth="2"
+              vectorEffect="non-scaling-stroke"
+            >
+              <title>Developable boundary at {site.inset_m} m setback — {site.developable_area_m2} m²</title>
+            </polygon>
+          </g>
+        )}
+
         {/* The storey below, faint -- drawn first so everything on this
             level reads over it. */}
         {layers.below && below.map((el, i) => (
@@ -134,13 +168,17 @@ export default function PlanView({ plan, layers, level = 0 }) {
           />
         ))}
 
+        {/* An outdoor area builds no walls, so no SA/SB/SC strokes land
+            on its boundary. Its own outline is therefore the only edge
+            it gets, and it has to carry the weight those strokes carry
+            on a room — hence the heavier, green stroke. */}
         {layers.fills && here.map((el, i) => (
           <polygon
             key={`f${i}`}
             points={el.corners.map((c) => `${c[0]},${-c[1]}`).join(" ")}
             fill={`var(--fill-${el.kind})`}
-            stroke="var(--rule)"
-            strokeWidth="1"
+            stroke={el.kind === "outdoor" ? "var(--outdoor-line)" : "var(--rule)"}
+            strokeWidth={el.kind === "outdoor" ? 2 : 1}
             vectorEffect="non-scaling-stroke"
           />
         ))}
@@ -218,7 +256,7 @@ export default function PlanView({ plan, layers, level = 0 }) {
           return (
             <text
               key={`t${i}`} x={cx} y={-cy} textAnchor="middle"
-              fontSize={92 * zoom} fontFamily="var(--mono)" fill="var(--ink)"
+              fontSize={92 * zoom} fontFamily="var(--sans)" fill="var(--ink)"
               paintOrder="stroke" stroke="var(--paper)" strokeWidth={3.5 * zoom}
             >{el.label}</text>
           );
@@ -242,14 +280,23 @@ export default function PlanView({ plan, layers, level = 0 }) {
           <span className="k">kind</span> {tip.el.kind}<br />
           <span className="k">size</span> {fmt(tip.w / 100)} × {fmt(tip.d / 100)} m<br />
           <span className="k">area</span> {fmt((tip.w * tip.d) / 10000)} m²<br />
-          <span className="k">height</span> {fmt(tip.el.height_cm / 100)} m
-          {floorsOf(tip.el) > 1 ? ` (${floorsOf(tip.el)} storeys)` : ""}<br />
-          <span className="k">level</span> {tip.el.level ?? 0}<br />
-          <span className="k">walls</span> {tip.el.wall_ids.length}
-          {(() => {
-            const sh = tip.el.wall_ids.filter((id) => plan.walls[id]?.shared).length;
-            return sh > 0 ? ` (${sh} shared)` : "";
-          })()}
+          {/* Height, storeys and a wall count are all statements about a
+              ROOM. On open ground they would read as zeros standing for
+              missing data rather than for the thing being ground. */}
+          {tip.el.kind === "outdoor" ? (
+            <>open ground — no walls, not floor area</>
+          ) : (
+            <>
+              <span className="k">height</span> {fmt(tip.el.height_cm / 100)} m
+              {floorsOf(tip.el) > 1 ? ` (${floorsOf(tip.el)} storeys)` : ""}<br />
+              <span className="k">level</span> {tip.el.level ?? 0}<br />
+              <span className="k">walls</span> {tip.el.wall_ids.length}
+              {(() => {
+                const sh = tip.el.wall_ids.filter((id) => plan.walls[id]?.shared).length;
+                return sh > 0 ? ` (${sh} shared)` : "";
+              })()}
+            </>
+          )}
           {tip.el.rooms.length > 0 && (
             <><br /><span className="k">rooms</span> {tip.el.rooms.map((r) => r.name).join(", ")}</>
           )}

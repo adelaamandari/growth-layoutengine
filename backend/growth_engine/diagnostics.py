@@ -30,7 +30,7 @@ resolved across 59 walls, 28 of them shared.
 from __future__ import annotations
 
 from .geometry import Point
-from .growth import PlacedElement
+from .growth import PlacedElement, builds_walls
 
 # Two edges count as the same physical wall if every endpoint of one sits
 # within this distance of the other's infinite line. 2cm is deliberately
@@ -84,11 +84,19 @@ def shared_boundaries(elements: list[PlacedElement]) -> tuple[float, list[dict]]
     plan, so without that guard a corridor on level 1 standing directly
     above the one on level 0 would report its whole length as shared --
     they are two real walls, one above the other, sharing nothing.
+
+    Outdoor areas are skipped for the same reason they are skipped in
+    resolution: a garden's boundary is not a wall, so a unit standing
+    against one shares nothing with it. `builds_walls` is imported from
+    growth, NOT from walls.py -- this module's independence from the
+    resolution logic is the point of it, and what has a wall is a fact
+    about the plan, not about how walls get resolved.
     """
+    walled = [el for el in elements if builds_walls(el)]
     segments: list[dict] = []
     total = 0.0
-    for i, e1 in enumerate(elements):
-        for e2 in elements[i + 1:]:
+    for i, e1 in enumerate(walled):
+        for e2 in walled[i + 1:]:
             if getattr(e1, "level", 0) != getattr(e2, "level", 0):
                 continue
             for ea in element_edges(e1):
@@ -111,9 +119,15 @@ def wall_length(elements: list[PlacedElement]) -> float:
     """Total edge length summed per element, in cm -- i.e. counting a
     shared boundary once for each side that claims it. This is the
     NAIVE figure; compare it against the resolved walls to see what
-    deduplication recovered."""
+    deduplication recovered.
+
+    Counts only elements that build walls, so the naive total and the
+    resolved total are measuring the same set and verify_walls compares
+    like with like."""
     total = 0.0
     for el in elements:
+        if not builds_walls(el):
+            continue
         for a, b in element_edges(el):
             total += ((b.x - a.x) ** 2 + (b.y - a.y) ** 2) ** 0.5
     return total

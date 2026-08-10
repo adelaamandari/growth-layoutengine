@@ -236,10 +236,113 @@ frontend/                React + Vite viewer
   `UNIT_CATALOG` auto-loads bundled exports from `unit_exports/` at import
   time. All 10 types have real rooms. (Its module docstring used to deny
   this; corrected 2026-07-31, and it now says so explicitly.)
+- **`facade.py` / `facade_import.py`** — **NEW.** The envelope. `facade_import`
+  reads the nine panel GLBs (A–I) into `facade_exports/facades.json` the same
+  library-free way `glb_import` reads the components; `facade.py` picks a panel
+  for every exterior bay and places it. Three things worth knowing:
+  - **Exterior means one owner.** `walls.resolve_walls` already computes this —
+    a wall with two owners is internal — so there is no separate envelope model.
+  - **Panels tile a RUN, not a wall.** Collinear exterior walls on one storey
+    merge first, because a facade is continuous across the building. Tiling each
+    resolved wall alone clad 65% of the envelope; merging takes it to 73%.
+  - **330 ≠ 360, and it cannot be made to.** Measured: the panel's own posts are
+    on a **50 cm** rhythm (7 pairs, 300 cm end post to end post) inside a 330 cm
+    overall; the structural bay is a surveyed **360 cm**. 360 is not a multiple of
+    50, so no offset lands the panel posts on the column grid — 330 and 360
+    realign only every LCM 3960 cm (12 panels to 11 bays, 39.6 m). There is no
+    arrangement to search for. `build_facade(align=…)` therefore offers the two
+    honest readings of `330 + 30 = 360`, and `column_alignment()` measures the
+    result rather than asserting it:
+    | | panels | clad | centred in a bay | mean drift |
+    |---|---|---|---|---|
+    | `"run"` (default) | 78 | 65.3% | 2.6% | 85 cm |
+    | `"grid"` | 56 | 46.9% | **100%** | **0 cm** |
+    Grid mode costs 18 points of coverage, because a whole 330 panel must fit
+    inside a 360 bay that is wholly on wall. It also leaves 15 cm clear at each
+    column line, into which a 40 cm column laps **5 cm onto each neighbouring
+    panel** — the panel is 10 cm too wide to sit clear between columns. That lap
+    is reported, not swallowed: it is a fixing detail if intended and a clash if
+    not, and the engine cannot tell which. **The real fix is a 320 cm panel (or a
+    360 cm one), which is a question for Adela, not for this code.**
+  - The panel module is not the structural bay, deliberately.
+    Panels are fixed components, so a run takes whole panels and the remainder is
+    reported (`unclad_cm`, split into `too_short_cm` and `remainder_cm`) rather
+    than stretched. Nearly all of `too_short_cm` is 170cm corridor ends, which
+    want a narrower panel type that does not exist yet.
+  - **The module is anchored per ELEVATION, not per storey.** One datum per plan
+    line, shared by every level on it, so panels can only land at
+    `base + k*pitch` and a panel on level 2 sits exactly above the one on level 1.
+    Tiling each storey independently is the obvious way to write it and it never
+    stacks — nothing errors, the panels just come out offset a metre or two per
+    floor. `verify_facade` catches exactly that (it reported 0 stacked pairs), and
+    `/api/facade` returns it as `connection_check` on every response.
+  - **The vertical datum is the column, not the bounding box.** Eight panels model
+    their column at z 0..300 and let the shading fins overhang to 310. Panel D
+    does not — its whole panel sits 10cm low. `facade_import` therefore takes the
+    datum from the column zone, which fixes D at the source; rebasing on the
+    bounding box preserved the error and hung every D below its slab.
+- **`site/location.py`** — **NEW.** The project has a real site: the triangle at
+  Coffey St / Deptford Church St / Crossfield St, London SE8 (51.479058,
+  −0.023964). Corners are the real OSM intersection **nodes** — each pair of
+  streets shares one, so they come back with a 0.00 m gap rather than as two
+  polylines nearly meeting. 4,588 m² to centrelines, 2,797 m² at a 6 m setback.
+  Three things to know:
+  - `boundary(inset_m)` is a **true edge offset**, each edge pushed along its own
+    inward normal. Not a scale about the centroid, which is the tempting
+    one-liner and over-shrinks this scalene triangle by ~400 m². Verified against
+    the closed form `A·((r−d)/r)²` at every inset, exact to <0.5 m².
+  - The degeneracy guard is a **half-plane test, not a winding test**: offsetting
+    a triangle past its inradius is a negative homothety about the incentre,
+    which preserves winding, so a sign check hands back a plausible-looking
+    inverted triangle.
+  - `best_placement()` searched origin and rotation and returned **rotation 0** —
+    a real finding, not a default left alone. Coffey St bears 87° and Deptford
+    Church St 176°, so the plot is within 4° of cardinal and the engine's axes
+    are already street-aligned.
+  **Growth is now constrained to it** — the long-standing open item is closed.
+  `generate_floorplan(..., boundary=…)` places nothing that is not wholly inside
+  the polygon, at any level, and `/api/plan` does it by default. Four notes:
+  - **Both tests are needed.** `geometry.polygon_contains` checks every corner
+    inside AND no edge properly crossing. Corners alone pass a rectangle
+    bridging a concave notch; edge-crossing alone passes a footprint entirely
+    outside. Together they are exact for any simple polygon, which matters
+    because a boundary need not be a triangle.
+  - **The corridor is tested, not just the room.** A unit can sit legitimately
+    inside the boundary while the only corridor reaching it crosses out, so each
+    bay's corridor strip is tested alongside the footprint, and branch corridors
+    are trimmed back to what fits rather than assumed.
+  - **The armature is audited, not trusted.** The entry run and the core are
+    placed before any test can run — they are what everything else is placed
+    against. `plan.off_site` lists what the constraint could not stop; on this
+    site at a 6 m setback it is empty, and at a 12 m setback it correctly
+    reports `Corridor (L0)`, meaning the origin is too near an edge.
+  - **It makes the building stack**, which is the point: 6 levels unconstrained
+    → 5 constrained on the default program, and a 30-unit program that will not
+    fit goes to the 12-level cap and reports 6 unplaced rather than sprawling.
+  Still not modelled: `max_branch_cm` and the boundary both stay on and do
+  different jobs (compactness vs possibility), and growth does not try to
+  *choose* placements that fit better — it just refuses the ones that do not.
+- **`solar.py`** — **NEW.** Clear-sky irradiation per facade panel: real sun
+  geometry (declination, hour angle, altitude, azimuth) over 132 above-horizon
+  positions in the year, direct beam by incidence angle plus isotropic diffuse
+  through a 0.5 sky view factor, and a ray-AABB shadow test against the
+  building's own massing. ~160ms on the default program, so `/api/facade` always
+  runs it and the heatmap is a display toggle rather than a refetch. Sanity: at
+  52°N a south elevation comes out ~1200 kWh/m²·yr, east and west ~720 and
+  near-equal (as they must be), north ~200 — non-zero because of the diffuse
+  term, which is right; a north window is dimmer, not dark.
+- **`shared_spaces.py`** — **NEW.** The flexible half of the program:
+  `SharedSpace` carries a frontage RANGE and a depth RANGE rather than a
+  measurement, because a shared space has a brief and not a survey. Holds the
+  indoor rooms (Lobby, Gym, Library, Workspace, SK, SL) and the outdoor
+  ground (Garden, Playground); `kind` is the `PlacedElement` kind each
+  produces, which is what makes an outdoor area walls-free everywhere
+  downstream. An unrecognised key falls back to a blank flexible room.
 - **`growth.py`** — `generate_floorplan(program, seed, max_branch_cm,
   max_levels)` runs the full entrance→corridor→core→branch→room growth, level
   by level, and returns a `FloorPlan` with `elements`
-  (corridor/core/unit/communal `PlacedElement`s), `walls` and `level_count`.
+  (corridor/core/unit/communal/outdoor `PlacedElement`s), `walls` and
+  `level_count`.
   Each element carries a `level`, a `z0` (its slab height) and `floors` (2 for
   a duplex). See the growth-logic section above for how the cap decides
   whether the plan spreads or stacks.
@@ -494,26 +597,77 @@ converts (to metres), because that is what Blender and Rhino expect.
   cantilevers there.
 - **Only one program list per run** — no automatic program generation from
   a target unit mix or area budget; you hand it an explicit ordered list.
-- **The seed barely does anything.** `random` is called in exactly one place,
-  for communal room width. Every residential unit places deterministically,
-  so two seeds on the same program differ only in how wide SK and SL are.
-  The program list is the real design input.
-- **An unknown program key silently becomes a communal room.** That is how
-  `SK`/`SL` work, so it can't be rejected — but it means `Studio_C` builds a
-  blank box rather than failing. The API reports `communal` and `suspect`
-  keys so the UI can warn; the engine itself still accepts anything.
+- **The seed barely does anything.** `random` is called only to pick a
+  flexible space's size inside its range. Every residential unit places
+  deterministically, so two seeds on the same program differ only in the size
+  of the shared rooms and outdoor areas. The program list is the real design
+  input.
+- **An unknown program key silently becomes a blank flexible room.** That is
+  the fallback `SK`/`SL` relied on before `shared_spaces.py` existed, so it
+  can't be rejected — but it means `Studio_C` builds a blank box rather than
+  failing. The API reports `communal` and `suspect` keys so the UI can warn
+  (a key that IS in the shared catalog is never suspect); the engine itself
+  still accepts anything.
 - **The entrance is now recessed.** With circulation at true scale, units on
   the east–west branches (4–8m deep) project past the 3.4m entry run, so the
   entrance sits in a notch rather than at the building edge. Not a bug — it
   follows from the spec's own numbers — but it only became visible once the
   10× error was fixed.
-- **Communal room sizes are placeholders and not Adela's numbers.** Set to
-  600cm frontage × 400–700cm deep, scaled against the real unit catalog.
-  Replace when the communal catalog defines them.
-- **Communal room interiors** (SK, SL) are single flexible boxes, not
-  subdivided — correct, since the communal catalog doesn't define
-  sub-spaces for them, just noting it's asymmetric with residential
-  treatment.
+- **Shared-space sizes are a brief, not Adela's numbers.** `shared_spaces.py`
+  gives each of Lobby, Gym, Library, Workspace, SK, SL, Garden and Playground
+  its own frontage and depth RANGE, scaled against the real unit catalog
+  (roughly 20–110 m² indoors, 42–192 m² outdoors). That is a step up from the
+  single 600 × 400–700 cm placeholder every communal room used to share, but
+  it is still a brief. Replace when the shared catalog is fixed.
+- **Shared room interiors** (SK, SL, Lobby, Gym, …) are single flexible
+  boxes, not subdivided — correct, since nothing defines sub-spaces for them,
+  just noting it's asymmetric with residential treatment.
+- **The facade covers 65% of the envelope, and that is the honest number.** The
+  panel set is nine fixed 330cm components; a run takes whole panels and the rest
+  is reported. Of the 137m left on the default program, 106m is remainder at the
+  ends of clad runs (wants a filler piece) and 31m is runs narrower than any
+  panel — almost entirely the 170cm corridor and core ends, which no arrangement
+  of these nine will ever cover. **A narrow panel type is the missing piece.**
+  Coverage was 73% before the module was anchored per elevation; alignment costs
+  8 points and is worth it, because the 73% version did not stack. A building
+  whose storeys all use the same unit type (so the elevations coincide) clads to
+  79% with 56 stacked pairs — the loss is the plan stepping, not the rule.
+- **The solar map is comparable, not predictive.** Clear-sky, so it is an upper
+  bound; no neighbours, no weather, no ground reflection, and no panel-on-panel
+  shading, which means balconied elevations read slightly warm since a balcony
+  does not shade the window under it. Latitude now comes from the real site
+  (51.479°N). The neighbouring buildings still do not join the shadow test —
+  `site/analysis.py` already knows how to find them, so that is the next honest
+  improvement.
+- **The site is obeyed, but not designed to.** Growth refuses placements outside
+  the boundary; it does not *seek* placements that use the plot well. A triangle
+  has two acute corners this engine will never fill, because it only ever builds
+  axis-aligned rectangles off three orthogonal branches. Rotating the armature
+  to the hypotenuse, or letting a run follow a diagonal edge, is the next real
+  move — and it is a growth-logic change, not a boundary one.
+- **`site_fit` used to measure the bounding box.** That was defensible while
+  nothing was constrained and wrong the moment something was: this building is
+  cross-shaped, so its bounding rectangle hangs over the site edge while every
+  element inside it is comfortably on the plot. It reported 99.3% and
+  `fits: False` for a plan that was entirely on the site. It measures the
+  elements now, and agrees with the engine's own test.
+- **Panel choice is a rule table, not a survey.** Adela gave the nine panels'
+  *purposes*; which bay gets which is `facade._choose`, and it leans on the one
+  ordering available without a site: a run's rank by length among its element's
+  exterior walls, i.e. the longest exterior face is the principal elevation. Once
+  `site/analysis.py` is wired in, orientation and daylight are the better input
+  and this rule should be replaced rather than extended.
+- **Outdoor areas are ground, not rooms.** Garden and Playground are placed by
+  the same growth logic, flush against a corridor edge so they stay reachable,
+  but they build no walls, carry no frame, take no ceiling, and are reported
+  as `outdoor_area_m2` rather than floor area. `growth.builds_walls` is the
+  single predicate; `walls.py`, `frame.py` and `diagnostics.py` all filter on
+  it, and they have to agree or `verify_walls` fails against its own plan.
+  They are also placed in a ground-floor pass AFTER the building has stacked
+  and are exempt from `max_branch_cm` — that cap decides how compact the
+  *building* is, and open ground has no upper storey to be pushed into. The
+  consequence to know about: an outdoor entry's position in the program order
+  is not honoured, only its order relative to other outdoor entries.
 - **Infill members in a run's last bay are still bespoke.** Primary grid beams
   are all catalog parts, but a wall run rarely divides into whole bays, so its
   final bay stretches or shortens — 47% of infill members come out at exact

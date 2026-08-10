@@ -9,8 +9,9 @@ import {
   frameDuration,
   prefersReducedMotion,
 } from "./frameInstances";
+import { applySceneTheme } from "../theme";
 
-export default function FrameView({ frame, animate = true }) {
+export default function FrameView({ frame, animate = true, theme = "light" }) {
   const mountRef = useRef(null);
   const stateRef = useRef(null);
   const animRef = useRef(null);
@@ -22,8 +23,6 @@ export default function FrameView({ frame, animate = true }) {
     if (!mount) return undefined;
 
     const scene = new THREE.Scene();
-    const dark = window.matchMedia?.("(prefers-color-scheme: dark)").matches;
-    scene.background = new THREE.Color(dark ? 0x1a1a19 : 0xfbfcfb);
 
     const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 5000);
     camera.position.set(40, 30, 40);
@@ -36,8 +35,11 @@ export default function FrameView({ frame, animate = true }) {
     controls.enableDamping = true;
     controls.dampingFactor = 0.08;
 
-    scene.add(new THREE.AmbientLight(0xffffff, dark ? 1.4 : 1.9));
-    const key = new THREE.DirectionalLight(0xfff3e2, dark ? 1.7 : 2.0);
+    // Base intensities, i.e. what these are at lightScale 1 -- the theme
+    // effect scales them and cannot recover the base from the light.
+    const ambient = new THREE.AmbientLight(0xffffff, 1.9);
+    scene.add(ambient);
+    const key = new THREE.DirectionalLight(0xfff3e2, 2.0);
     key.position.set(30, 60, 20);
     scene.add(key);
     const rim = new THREE.DirectionalLight(0xdfe6ff, 0.55);
@@ -46,9 +48,6 @@ export default function FrameView({ frame, animate = true }) {
 
     const group = new THREE.Group();
     scene.add(group);
-
-    const grid = new THREE.GridHelper(200, 40, dark ? 0x383835 : 0xc3c2b7, dark ? 0x2c2c2a : 0xdfe2df);
-    scene.add(grid);
 
     let raf;
     const tick = () => {
@@ -89,7 +88,14 @@ export default function FrameView({ frame, animate = true }) {
     const ro = new ResizeObserver(resize);
     ro.observe(mount);
 
-    stateRef.current = { scene, camera, controls, group, renderer };
+    stateRef.current = {
+      scene, camera, controls, group, renderer, grid: null,
+      lights: [
+        { light: ambient, base: 1.9 },
+        { light: key, base: 2.0 },
+        { light: rim, base: 0.55 },
+      ],
+    };
 
     return () => {
       cancelAnimationFrame(raf);
@@ -101,6 +107,15 @@ export default function FrameView({ frame, animate = true }) {
       animRef.current = null;
     };
   }, []);
+
+  // Background, ground grid and light levels follow the theme. Declared
+  // after the effect above so it runs after it on mount, in the same
+  // flush -- the first composited frame already has the right colours.
+  // The timber's own colours do not change: they are the surveyed
+  // material, and wood is wood in either theme.
+  useEffect(() => {
+    if (stateRef.current) applySceneTheme(THREE, stateRef.current, theme);
+  }, [theme]);
 
   useEffect(() => {
     const st = stateRef.current;
@@ -159,7 +174,7 @@ export default function FrameView({ frame, animate = true }) {
 
   return (
     <div className="viewport">
-      <div ref={mountRef} style={{ width: "100%", height: "min(66vh, 640px)" }} />
+      <div ref={mountRef} className="canvas-mount" />
       <div className="hint">
         <span>Drag to orbit · scroll to zoom · right-drag to pan</span>
         <span className="growth">

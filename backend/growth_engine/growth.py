@@ -8,7 +8,19 @@ derived from the room catalog). Residential units use their REAL
 footprint from catalog.py (width_cm along the corridor frontage,
 depth_cm extending outward), so different unit types genuinely occupy
 different amounts of space, rather than a uniform placeholder module.
-Communal spaces (SK, SL, etc.) remain flexible-sized single rooms.
+Shared spaces (Lobby, Gym, Library, Workspace, SK, SL) remain
+flexible-sized single rooms, drawn from the ranges in shared_spaces.py.
+
+OUTDOOR AREAS ARE GROUND, NOT STOREYS
+Garden and Playground are placed by the same growth logic -- flush
+against a corridor edge, because they have to be reachable -- but they
+are not rooms. They enclose nothing, so they build no walls, carry no
+frame, and are not floor area. `builds_walls` is the single predicate
+that says so, and walls.py, frame.py and diagnostics.py all filter on
+it. They are also placed in a separate ground-floor pass AFTER the
+building has stacked, and are exempt from `max_branch_cm`: that cap
+exists to stop the BUILDING sprawling, and a garden has no upper storey
+to be pushed into.
 
 Overlap is checked with geometry.polygons_overlap, which tolerates
 flush-touching edges -- this is what makes units attach directly to
@@ -42,8 +54,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import random
 
-from .geometry import Point, polygons_overlap
+from .geometry import Point, polygon_contains, polygons_overlap
 from .catalog import UnitType, get_unit
+from .shared_spaces import SharedSpace, get_shared, is_outdoor
 from .walls import Wall, resolve_walls, walls_by_owner
 
 # NOTE ON UNITS: everything in this engine is CENTIMETRES. The constants
@@ -58,15 +71,24 @@ CORE_SIZE_CM = 170.0             # 1.7x1.7m -- see PROJECT_SUMMARY, may need rev
 CORE_HALF = CORE_SIZE_CM / 2
 ENTRY_CORRIDOR_BAYS_CM = 340.0   # entrance straight run before reaching core (2 bays)
 
-# Communal rooms have no surveyed geometry, so these stay placeholders --
-# but they are now sized against the real unit catalog (6m frontage,
-# 4-7m deep = 24-42 sqm) rather than left at the old 17m x 20-40m, which
-# was absurd next to a 1.7m corridor. Replace with real numbers when the
-# communal catalog defines them.
-# Naming is inherited and misleading: _DEPTH_CM is the FRONTAGE measured
-# along the corridor; _WIDTH_RANGE is the extent perpendicular to it.
-COMMUNAL_WIDTH_RANGE = (400.0, 700.0)
-COMMUNAL_DEPTH_CM = 600.0
+# Shared-space sizes used to live here as a single frontage/depth pair
+# for every communal room. They are now per type, in shared_spaces.py,
+# because a gym and a shared kitchen are not the same brief -- and
+# because the ranges there also carry the indoor/outdoor distinction.
+
+# An outdoor area is a surfaced piece of ground, not a storey. It gets a
+# real but token thickness so the massing and OBJ export have a solid to
+# extrude rather than a degenerate zero-height box (three.js warns on
+# those, and a zero-volume OBJ face is not a thing).
+OUTDOOR_HEIGHT_CM = 15.0
+
+# Kinds that enclose space with built walls. Everything that counts
+# walls, frames timber, or measures floor area filters on this -- an
+# outdoor area is in the plan and in the massing, but it is ground, and
+# ground has no perimeter to build. Keeping the test in ONE place is the
+# point: walls.py, frame.py and diagnostics.py must agree about what has
+# a wall, or verify_walls fails against its own plan.
+WALLED_KINDS = ("corridor", "core", "unit", "communal")
 
 # One storey. Matches massing.DEFAULT_FLOOR_HEIGHT_CM and frame.STOREY_CM;
 # a duplex's surveyed 600cm is exactly two of these.
@@ -100,8 +122,10 @@ MAX_EMPTY_LEVELS = 2
 PROBE_STEP_CM = 100.0
 
 # Keys the engine builds as real surveyed units. Anything else in a
-# program becomes a flexible communal room -- that is how SK/SL work,
-# and it is why a typo builds a blank box instead of failing.
+# program becomes a flexible shared space -- a known one gets its brief
+# from shared_spaces.py, and an unknown one still becomes a blank room
+# rather than an error, which is why a typo builds a box instead of
+# failing.
 RESIDENTIAL_KEYS = (
     "Studio_A", "Studio_B", "1Bed_A", "1Bed_B",
     "2Bed_A", "2Bed_B", "3Bed_A", "3Bed_B", "4Bed_A", "4Bed_B",
@@ -110,7 +134,7 @@ RESIDENTIAL_KEYS = (
 
 @dataclass
 class PlacedElement:
-    kind: str                 # "corridor" | "core" | "unit" | "communal"
+    kind: str                 # "corridor" | "core" | "unit" | "communal" | "outdoor"
     label: str                # e.g. "1Bed_A", "SK"
     corners: list[Point]      # 4 corners, in order
     height_cm: float = 300.0  # default single floor
@@ -151,10 +175,22 @@ class FloorPlan:
     dropped_wall_count: int = 0
     # How many storeys the program ended up needing.
     level_count: int = 1
+    # The site this was grown inside, if any, and anything that ended up
+    # outside it. See _audit_site: the armature is placed before any test
+    # can run, so "constrained" is a claim that has to be checked rather
+    # than assumed.
+    boundary: list[Point] | None = None
+    off_site: list[str] = field(default_factory=list)
 
 
 def _rect(p1: Point, p2: Point, p3: Point, p4: Point) -> list[Point]:
     return [p1, p2, p3, p4]
+
+
+def builds_walls(el: PlacedElement) -> bool:
+    """Does this element have a physical perimeter to build? False for
+    outdoor areas, which are ground rather than rooms. See WALLED_KINDS."""
+    return el.kind in WALLED_KINDS
 
 
 def _assign_growth_steps(elements: list[PlacedElement]) -> None:
@@ -179,7 +215,9 @@ def _assign_growth_steps(elements: list[PlacedElement]) -> None:
     Elements sharing a step grow together: a unit's rooms all carry the
     unit's step, so a unit rises as one thing rather than room by room.
     """
-    rank = {"corridor": 1, "core": 0, "unit": 2, "communal": 2}
+    # Outdoor areas rank last: the ground around a building is laid out
+    # after the building, and the animation reads better for it.
+    rank = {"corridor": 1, "core": 0, "unit": 2, "communal": 2, "outdoor": 3}
     # The entry run is elements[0] by construction, and it is the one
     # corridor that should precede the core rather than follow it.
     order = sorted(
@@ -190,6 +228,21 @@ def _assign_growth_steps(elements: list[PlacedElement]) -> None:
     )
     for step, idx in enumerate(order):
         elements[idx].growth_step = step
+
+
+def _on_site(corners, boundary) -> bool:
+    """Does this footprint lie inside the site?
+
+    `boundary` is None when growth is unconstrained, which is still the
+    library default -- the engine describes a building, and not every
+    caller has a site. The API supplies one.
+
+    Applied at EVERY level, not just the ground. A cantilever over the
+    boundary is a real building move and this rules it out; that is the
+    conservative reading, and the one to revisit first if the massing
+    wants to reach out over the pavement.
+    """
+    return boundary is None or polygon_contains(corners, boundary)
 
 
 def _reserve(occupied: dict[int, list], level: int, floors: int, corners) -> None:
@@ -229,7 +282,7 @@ def _add_core(elements, occupied, core_pos: Point, level: int = 0):
 
 def _try_add_unit(elements, occupied, edge_start: Point, edge_end: Point,
                    perp_dir: Point, side: int, unit: UnitType,
-                   level: int = 0) -> bool:
+                   level: int = 0, boundary=None) -> bool:
     out = perp_dir.scaled(side)
     c1, c2 = edge_start, edge_end
     c3 = edge_end + out.scaled(unit.depth_cm)
@@ -238,6 +291,8 @@ def _try_add_unit(elements, occupied, edge_start: Point, edge_end: Point,
     # A duplex has to clear BOTH the storey it stands on and the one it
     # reaches into, or it would grow through the floor above it.
     floors = max(1, int(round(unit.height_cm / LEVEL_HEIGHT_CM)))
+    if not _on_site(corners, boundary):
+        return False
     if not _is_free(occupied, level, floors, corners):
         return False
     _reserve(occupied, level, floors, corners)
@@ -247,25 +302,47 @@ def _try_add_unit(elements, occupied, edge_start: Point, edge_end: Point,
     return True
 
 
-def _try_add_communal(elements, occupied, edge_start: Point, edge_end: Point,
-                       perp_dir: Point, side: int, label: str,
-                       level: int = 0) -> bool:
-    width = random.uniform(*COMMUNAL_WIDTH_RANGE)
+def _try_add_shared(elements, occupied, edge_start: Point, edge_end: Point,
+                    perp_dir: Point, side: int, spec: SharedSpace, label: str,
+                    depth: float, level: int = 0, boundary=None) -> bool:
+    """Place one flexible space of the given depth against the corridor.
+
+    Frontage is fixed by the caller -- it is the length the run walks and
+    the corridor has to reach -- so the only thing that gives when the
+    bay is tight is the DEPTH, shrinking away from the corridor. That is
+    the one dimension a shared space can lose without moving anything
+    already placed.
+
+    An outdoor area is a pad, not a storey: it takes OUTDOOR_HEIGHT_CM
+    and the "outdoor" kind, and everything downstream reads the kind.
+    """
+    height = OUTDOOR_HEIGHT_CM if spec.is_outdoor else LEVEL_HEIGHT_CM
     shrink = 1.0
-    for attempt in range(7):
-        w = width * shrink
-        off = perp_dir.scaled(side * w)
+    for _attempt in range(7):
+        off = perp_dir.scaled(side * depth * shrink)
         c1, c2 = edge_start, edge_end
         c3, c4 = edge_end + off, edge_start + off
         corners = _rect(c1, c2, c3, c4)
-        if _is_free(occupied, level, 1, corners):
+        # The shrink loop is what makes a shared space flexible, so the
+        # site test belongs INSIDE it: a lobby too deep for the plot
+        # should get shallower, not disappear.
+        if _on_site(corners, boundary) and _is_free(occupied, level, 1, corners):
             _reserve(occupied, level, 1, corners)
             elements.append(PlacedElement(
-                "communal", label, corners, level=level,
+                spec.kind, label, corners, height_cm=height, level=level,
             ))
             return True
         shrink *= 0.68
     return False
+
+
+def _corridor_bay(br: dict, probe: float, length: float) -> list[Point]:
+    """The stretch of branch corridor serving one bay, as a rectangle."""
+    a = br["start"] + br["dir"].scaled(probe)
+    b = br["start"] + br["dir"].scaled(probe + length)
+    pd_ = br["pd"]
+    return _rect(a + pd_.scaled(-CORRIDOR_HALF), b + pd_.scaled(-CORRIDOR_HALF),
+                 b + pd_.scaled(CORRIDOR_HALF), a + pd_.scaled(CORRIDOR_HALF))
 
 
 def _make_branches(core_pos: Point) -> list[dict]:
@@ -280,6 +357,64 @@ def _make_branches(core_pos: Point) -> list[dict]:
     return branches
 
 
+def _grow_outdoor(elements, occupied, branches: list[dict], keys: list[str],
+                  unit_counts: dict[str, int], max_branch_cm: float,
+                  boundary=None) -> None:
+    """
+    Lay the open-air areas on the ground, past whatever the built program
+    left on each run.
+
+    Two things make this a separate pass rather than another case inside
+    the main loop.
+
+    It is GROUND FLOOR ONLY. The main loop moves up a storey when a level
+    fills, which is right for rooms and meaningless for a garden -- there
+    is no storey above the ground for open ground to go to. Letting an
+    outdoor entry take part in that loop meant a garden that did not fit
+    on level 0 either vanished or stalled the rest of the program behind
+    it.
+
+    It is EXEMPT from max_branch_cm. That cap decides how compact the
+    BUILDING is: a unit that would overshoot it starts the next storey
+    instead. Open ground has no next storey, and a garden squeezed
+    against the core is not a better garden, so the runs may reach
+    further out here. The branch corridors are measured after this pass,
+    so a corridor grows to MEET the garden rather than stopping short of
+    it -- which is what makes the garden reachable.
+    """
+    runs = [(br, side) for br in branches for side in (-1, 1)]
+    reach = max_branch_cm * 3
+    bi = 0
+    for key in keys:
+        spec = get_shared(key)
+        frontage = random.uniform(*spec.frontage_cm)
+        depth = random.uniform(*spec.depth_cm)
+        placed = False
+        for attempt in range(len(runs)):
+            br, side = runs[(bi + attempt) % len(runs)]
+            offset_key = "offset_l" if side == -1 else "offset_r"
+            probe = br[offset_key]
+            while probe + frontage <= reach and not placed:
+                bay_start = br["start"] + br["dir"].scaled(probe)
+                bay_end = br["start"] + br["dir"].scaled(probe + frontage)
+                edge_start = bay_start + br["pd"].scaled(side * CORRIDOR_HALF)
+                edge_end = bay_end + br["pd"].scaled(side * CORRIDOR_HALF)
+                # Exempt from max_branch_cm, NOT from the site. Open
+                # ground still has to be on the plot -- a garden on the
+                # neighbour's land is not a garden.
+                if _try_add_shared(elements, occupied, edge_start, edge_end,
+                                   br["pd"], side, spec, key, depth, level=0,
+                                   boundary=boundary):
+                    br[offset_key] = probe + frontage
+                    unit_counts[key] = unit_counts.get(key, 0) + 1
+                    bi += attempt + 1
+                    placed = True
+                    break
+                probe += PROBE_STEP_CM
+            if placed:
+                break
+
+
 def _resolve_walls_per_level(elements: list[PlacedElement]):
     """
     Resolve walls one storey at a time and renumber into a single list.
@@ -291,11 +426,18 @@ def _resolve_walls_per_level(elements: list[PlacedElement]):
     -- a duplex belongs to the level it stands on, and its walls are
     simply 600cm tall.
 
+    Outdoor areas are skipped: they have no perimeter to build, and
+    handing their edges to resolve_walls would put a timber wall around
+    a garden and count it in the take-off. Their indices are still
+    global, so the walls' owner ids stay valid against `elements`.
+
     Returns (walls, dropped_cm, dropped_count) with owners as global
     indices into `elements`, exactly as the single-group version did.
     """
     by_level: dict[int, list[int]] = {}
     for i, el in enumerate(elements):
+        if not builds_walls(el):
+            continue
         by_level.setdefault(el.level, []).append(i)
 
     walls: list[Wall] = []
@@ -317,22 +459,48 @@ def _resolve_walls_per_level(elements: list[PlacedElement]):
 
 def generate_floorplan(program: list[str], seed: int | None = None,
                        max_branch_cm: float = MAX_BRANCH_CM,
-                       max_levels: int = MAX_LEVELS) -> FloorPlan:
+                       max_levels: int = MAX_LEVELS,
+                       boundary: list[Point] | None = None) -> FloorPlan:
     """
     program: ordered list of type keys to place, e.g.
-        ["Studio_A", "1Bed_B", "SK", "2Bed_A", "SL", "3Bed_A"]
+        ["Lobby", "Studio_A", "SK", "2Bed_A", "Gym", "Garden"]
     Residential entries must match names in catalog.UNIT_CATALOG.
-    "SK" / "SL" (or any other non-catalog key) are treated as flexible
-    communal rooms.
+    Everything else is a flexible shared space: a key in
+    shared_spaces.SHARED_CATALOG takes that entry's size range, and any
+    other key still becomes a blank flexible room.
+
+    Outdoor keys (Garden, Playground) are pulled out of the program and
+    placed together on the ground after the building has grown -- see
+    _grow_outdoor for why. Their order relative to each other is kept;
+    their position among the rooms is not, because they are not on a
+    storey to be interleaved with.
 
     max_branch_cm caps how far a branch runs from the core. When no run
     on the current level can take the next unit within that cap, growth
     moves up a storey rather than reaching further out -- this is the
     knob that decides whether the composition sprawls or stacks. Pass a
     very large value for the old single-storey behaviour.
+
+    boundary is the site, as a polygon in the SAME frame as everything
+    else -- centimetres, with the entrance at the origin. Nothing is
+    placed that does not lie wholly inside it, at any level. Default None
+    keeps the engine site-agnostic: it describes a building, and not
+    every caller has a plot.
+
+    The boundary and max_branch_cm do different jobs and both stay on.
+    The cap decides compactness -- how far a run reaches before the
+    program goes up a storey. The boundary decides possibility. On a
+    tight site the boundary usually binds first, and the effect is the
+    one you want: the building stops spreading and starts stacking,
+    because that is the only direction left.
     """
     if seed is not None:
         random.seed(seed)
+
+    # Ground and building grow separately. Order within each half is
+    # preserved -- only the interleaving between them is dropped.
+    outdoor_program = [k for k in program if is_outdoor(k)]
+    program = [k for k in program if not is_outdoor(k)]
 
     elements: list[PlacedElement] = []
     # Occupancy is per level: a unit only has to clear what is actually
@@ -376,7 +544,18 @@ def generate_floorplan(program: list[str], seed: int | None = None,
             type_key = program[qi]
             is_residential = type_key in RESIDENTIAL_KEYS
             unit = get_unit(type_key) if is_residential else None
-            length = unit.width_cm if is_residential else COMMUNAL_DEPTH_CM
+            # A shared space is flexible, so its size is drawn here --
+            # once per program entry, not once per probe, or the run
+            # would be walking a different length at every step. The
+            # frontage is what the run consumes; the depth is what
+            # _try_add_shared gives back when the bay is tight.
+            spec = None if is_residential else get_shared(type_key)
+            depth = 0.0
+            if spec is not None:
+                length = random.uniform(*spec.frontage_cm)
+                depth = random.uniform(*spec.depth_cm)
+            else:
+                length = unit.width_cm
 
             placed = False
             for attempt in range(len(runs)):
@@ -395,12 +574,24 @@ def generate_floorplan(program: list[str], seed: int | None = None,
                     edge_start = bay_start + br["pd"].scaled(side * CORRIDOR_HALF)
                     edge_end = bay_end + br["pd"].scaled(side * CORRIDOR_HALF)
 
+                    # The corridor that reaches this bay has to be on the
+                    # site too, or a unit can end up legitimately inside
+                    # the boundary while the only way to it crosses out.
+                    # Checked per bay rather than for the whole run: the
+                    # branch corridor is emitted later as the union of
+                    # the bays that were actually used.
+                    if not _on_site(_corridor_bay(br, probe, length), boundary):
+                        probe += PROBE_STEP_CM
+                        continue
+
                     if is_residential:
                         ok = _try_add_unit(elements, occupied, edge_start, edge_end,
-                                           br["pd"], side, unit, level=level)
+                                           br["pd"], side, unit, level=level,
+                                           boundary=boundary)
                     else:
-                        ok = _try_add_communal(elements, occupied, edge_start, edge_end,
-                                               br["pd"], side, type_key, level=level)
+                        ok = _try_add_shared(elements, occupied, edge_start, edge_end,
+                                             br["pd"], side, spec, type_key,
+                                             depth, level=level, boundary=boundary)
                     if ok:
                         # Assign, not increment: the run may have
                         # skipped a gap to get past an obstruction, and
@@ -429,11 +620,35 @@ def generate_floorplan(program: list[str], seed: int | None = None,
                 break
         level += 1
 
+    # Open ground, on the ground floor, before the branch corridors are
+    # measured -- so a corridor reaching a garden actually reaches it. A
+    # program of nothing but outdoor entries never entered the loop
+    # above and so has no armature yet; it still needs the core and the
+    # branches to attach to.
+    if outdoor_program:
+        ground = next((brs for lv, brs in level_branches if lv == 0), None)
+        if ground is None:
+            _add_core(elements, occupied, core_pos, level=0)
+            ground = _make_branches(core_pos)
+            level_branches.append((0, ground))
+        _grow_outdoor(elements, occupied, ground, outdoor_program,
+                      unit_counts, max_branch_cm, boundary=boundary)
+
     # Branch corridors are only as long as the units that ended up on
     # them, which is not known until the level is finished.
+    #
+    # A run may have STEPPED PAST a blocked bay, so the emitted corridor
+    # can cover ground no bay test ever saw. On a site with a diagonal
+    # edge that stretch can fall outside, so the length is trimmed back
+    # to what fits rather than assumed. Trimming can only shorten a
+    # corridor to units it already reaches, never orphan one: every unit
+    # was placed at an offset whose own corridor bay tested on-site.
     for level_i, branches in level_branches:
         for br in branches:
             total = max(br["offset_l"], br["offset_r"])
+            while total > 0 and not _on_site(
+                    _corridor_bay(br, 0.0, total), boundary):
+                total -= PROBE_STEP_CM
             if total > 0:
                 _add_corridor(elements, occupied, br["start"],
                               br["start"] + br["dir"].scaled(total),
@@ -445,7 +660,8 @@ def generate_floorplan(program: list[str], seed: int | None = None,
     # otherwise-empty floor is the stair passing through it -- but drop
     # anything left standing above the topmost room.
     top_level = max((el.level + el.floors - 1
-                     for el in elements if el.kind in ("unit", "communal")),
+                     for el in elements
+                     if el.kind in ("unit", "communal", "outdoor")),
                     default=0)
     elements = [el for el in elements if el.level <= top_level]
 
@@ -460,9 +676,20 @@ def generate_floorplan(program: list[str], seed: int | None = None,
 
     _assign_growth_steps(elements)
 
+    # The entrance run and the core are laid down before any placement
+    # test can run -- they ARE the thing everything else is placed
+    # against -- so if the origin sits too near an edge they can end up
+    # off the plot with nothing to stop them. Audited rather than
+    # trusted, and reported rather than raised: a plan that pokes over
+    # the line is still worth looking at, and the caller should be the
+    # one to decide it is unacceptable.
+    off_site = [f"{el.label} (L{el.level})" for el in elements
+                if not _on_site(el.corners, boundary)]
+
     return FloorPlan(elements=elements, entrance=entrance, core_position=core_pos,
                      unit_counts=unit_counts, walls=walls,
                      dropped_wall_cm=dropped_cm,
                      dropped_wall_count=dropped_count,
                      level_count=max((el.level + el.floors for el in elements),
-                                     default=1))
+                                     default=1),
+                     boundary=boundary, off_site=off_site)

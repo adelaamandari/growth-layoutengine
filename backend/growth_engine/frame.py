@@ -85,7 +85,7 @@ from math import atan2, hypot
 from .components import BAY_CM, BAY_LENGTHS, BAY_NAMES
 from .geometry import Point
 from .glb_import import load_catalog
-from .growth import FloorPlan
+from .growth import FloorPlan, builds_walls
 from .massing import generate_room_massing
 from .walls import COLLINEAR_TOL_CM, resolve_walls
 
@@ -301,14 +301,20 @@ PHASE_COLUMN, PHASE_BEAM, PHASE_FLOOR, PHASE_INFILL = 0, 1, 2, 3
 
 
 def _boxes(plan: FloorPlan) -> list[tuple[int, float, float, float, float, float, float]]:
-    """Each element as (level, x0, y0, x1, y1, z0, z1).
+    """Each BUILT element as (level, x0, y0, x1, y1, z0, z1).
 
     A plan bounding box is enough because growth.py only ever builds
     axis-aligned rectangles -- corridors, cores and units are all laid
     out along the orthogonal branch directions.
+
+    Outdoor areas are not built, so they are not here: these boxes
+    decide where the grid extends and how tall each column has to be,
+    and a garden would stand columns in open ground.
     """
     out = []
     for el in plan.elements:
+        if not builds_walls(el):
+            continue
         xs = [c.x for c in el.corners]
         ys = [c.y for c in el.corners]
         z0 = getattr(el, "z0", 0.0)
@@ -389,9 +395,15 @@ def _on_element_edge(wall, elements) -> bool:
     the room side would be exactly the duplication walls.py exists to
     prevent. Every element is checked, not just the one that owns the
     room: a partition inside one unit can land on the outer wall of the
-    unit next door, and that wall is built either way."""
+    unit next door, and that wall is built either way.
+
+    Every element that BUILDS one, that is. A garden's boundary is not a
+    wall, so a partition lying along it is still the only member there
+    and still has to be drawn."""
     mid = Point((wall.start.x + wall.end.x) / 2, (wall.start.y + wall.end.y) / 2)
     for el in elements:
+        if not builds_walls(el):
+            continue
         for i in range(4):
             a, b = el.corners[i], el.corners[(i + 1) % 4]
             if all(_seg_distance(p, a, b) <= COLLINEAR_TOL_CM
@@ -772,6 +784,8 @@ def build_frame(plan: FloorPlan, joint_blocks: bool = False,
         return best
 
     for el in plan.elements:
+        if not builds_walls(el):
+            continue  # open ground takes no deck and no ceiling
         xs = [c.x for c in el.corners]
         ys = [c.y for c in el.corners]
         cx, cy = (min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2

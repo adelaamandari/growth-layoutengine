@@ -13,16 +13,25 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
+from growth_engine.site.location import DEFAULT_SITE
+
 # Keys the engine treats as real residential units; anything else in a
-# program is built as a flexible communal room.
+# program is built as a flexible shared space (see
+# growth_engine.shared_spaces).
 RESIDENTIAL = (
     "Studio_A", "Studio_B", "1Bed_A", "1Bed_B", "2Bed_A",
     "2Bed_B", "3Bed_A", "3Bed_B", "4Bed_A", "4Bed_B",
 )
 
+# A full mixed brief rather than housing alone: every unit type, the
+# shared rooms that make it a building rather than a corridor of flats,
+# and the open ground. Kept in step with the copy in frontend App.jsx --
+# that one is the UI's initial state, this one is the API default for a
+# request that omits `program`.
 DEFAULT_PROGRAM = [
-    "Studio_A", "Studio_B", "1Bed_A", "1Bed_B", "SK", "2Bed_A",
-    "2Bed_B", "SL", "3Bed_A", "3Bed_B", "4Bed_A", "4Bed_B",
+    "Lobby", "Studio_A", "Studio_B", "1Bed_A", "1Bed_B", "SK",
+    "Workspace", "2Bed_A", "2Bed_B", "SL", "Gym", "3Bed_A",
+    "3Bed_B", "Library", "4Bed_A", "4Bed_B", "Garden", "Playground",
 ]
 
 
@@ -40,6 +49,21 @@ class PlanRequest(BaseModel):
     # alone -- the frame as the Frame view has always drawn it. The
     # Build view asks for a finer pitch to fill the massing envelope.
     course_cm: float | None = None
+    # /api/facade only: latitude for the solar analysis, degrees north.
+    # Defaults to the REAL SITE rather than a placeholder -- a literal
+    # here silently shadowed the site once already, which is the kind of
+    # bug that shows up as a plausible-looking sun map.
+    latitude: float = DEFAULT_SITE.lat
+    # /api/facade only: "run" butts panels at their own 330cm width and
+    # centres the run on the wall; "grid" puts one panel per 360cm
+    # structural bay so every joint lands on a column. See
+    # growth_engine.facade for what each costs.
+    align: str = "run"
+    # Keep growth inside the real site. On by default: the project has a
+    # plot, and a building that ignores it is a different drawing.
+    constrain_to_site: bool = True
+    # Setback from the street centrelines the boundary is measured on.
+    site_inset_m: float = 6.0
 
 
 class RoomOut(BaseModel):
@@ -69,7 +93,10 @@ class WallOut(BaseModel):
 
 
 class ElementOut(BaseModel):
-    kind: str             # "corridor" | "core" | "unit" | "communal"
+    # "corridor" | "core" | "unit" | "communal" | "outdoor". An outdoor
+    # element is ground, not a room: it has no wall_ids, no rooms, and a
+    # token height rather than a storey.
+    kind: str
     label: str
     height_cm: float
     corners: list[list[float]]
@@ -101,12 +128,16 @@ class PlanResponse(BaseModel):
     core_position: list[float]
     unit_counts: dict[str, int]
     missing: list[str]
-    # Keys the engine built as flexible communal rooms because it did not
-    # recognise them. `suspect` is the subset that looks like a misspelt
-    # unit type -- see _classify_program in main.py.
+    # Every non-residential key in the program, i.e. everything built as
+    # a flexible shared space. `suspect` is the subset that matches
+    # neither catalog and looks like a misspelt unit type -- see
+    # _classify_program in main.py.
     communal: list[str]
     suspect: list[str]
     extent_cm: list[float]
+    # Whether this building lands on the real site. Reported, not
+    # enforced -- growth.py does not know about the boundary yet.
+    site_fit: dict = Field(default_factory=dict)
     # How many storeys the program needed. The plan view filters on it.
     level_count: int = 1
     stats: dict[str, float]
@@ -169,6 +200,64 @@ class FrameResponse(BaseModel):
     summary: dict
 
 
+class FacadeMemberOut(BaseModel):
+    """One timber member inside a panel, in PANEL-LOCAL centimetres:
+    x along the wall, y across it with 0 on the wall centre line and -y
+    outward, z up from the panel's own floor slab. Packed as arrays for
+    the same reason FrameMemberOut is -- there are ~1500 of them."""
+    c: list[float]        # centre [x, y, z]
+    s: list[float]        # size [x, y, z]
+
+
+class FacadePanelType(BaseModel):
+    key: str              # "A".."I"
+    label: str
+    note: str
+    use: str              # "residential" | "shared" | "any"
+    # Rank from blank to most open. The one axis all nine sit on, and
+    # what the legend sorts by.
+    glazing: int
+    width_cm: float
+    height_cm: float
+    depth_cm: float
+    # How far it reaches out past the column it sits on: 0 for the
+    # unshaded panel, 116 for the balcony.
+    projection_cm: float
+    members: list[FacadeMemberOut]
+
+
+class FacadeCatalogResponse(BaseModel):
+    panel_width_cm: float
+    panels: list[FacadePanelType]
+
+
+class FacadePanelOut(BaseModel):
+    panel: str            # "A".."I"
+    c: list[float]        # [x, y] of the panel centre on the wall line, cm
+    z0: float             # its floor slab
+    angle: float          # radians about the vertical
+    level: int
+    owner: str            # the element it clads
+    rule: str             # why this panel was chosen
+    # Clear-sky irradiation on this panel's plane, and the same rescaled
+    # 0..1 across the building so the heatmap uses its full range.
+    sun_kwh: float = 0.0
+    sun_norm: float = 0.0
+
+
+class FacadeResponse(BaseModel):
+    panels: list[FacadePanelOut]
+    summary: dict
+    # Proof the panels actually meet each other, vertically and
+    # horizontally -- see growth_engine.facade.verify_facade. Reported on
+    # every response, the way /api/plan reports wall_check.
+    connection_check: dict
+    # How the panel module lands against the structural column grid --
+    # the one thing the two systems cannot both have on their own terms.
+    alignment: dict
+    solar: dict
+
+
 class RoomInfo(BaseModel):
     name: str
     width_cm: float
@@ -190,9 +279,49 @@ class UnitInfo(BaseModel):
     rooms: list[RoomInfo]
 
 
+class SiteResponse(BaseModel):
+    """The real site the project sits on. Boundary comes across in
+    CENTIMETRES relative to the ENTRANCE, like everything else in the
+    plan, so the client can draw it straight over the floor plan."""
+    name: str
+    address: str
+    lat: float
+    lon: float
+    area_m2: float
+    developable_area_m2: float
+    inset_m: float
+    rotation_deg: float
+    # [[x, y], …] cm from the entrance, at inset_m, plus the raw
+    # street-centreline outline for context.
+    boundary_cm: list[list[float]]
+    centreline_cm: list[list[float]]
+    source: str
+    notes: list[str]
+
+
+class SharedSpaceInfo(BaseModel):
+    """One flexible program entry. Unlike a UnitInfo these are RANGES,
+    because a shared space has a brief rather than a survey -- the
+    generator picks inside them and the seed is what varies the pick."""
+    name: str
+    kind: str                      # "communal" | "outdoor"
+    # [min, max] along the corridor, and away from it.
+    frontage_cm: list[float]
+    depth_cm: list[float]
+    min_area_m2: float
+    max_area_m2: float
+    description: str
+
+
 class CatalogResponse(BaseModel):
     units: list[UnitInfo]
+    # Every flexible space with its size range and blurb.
+    shared_spaces: list[SharedSpaceInfo]
+    # Names only, split the way the program editor groups them.
+    # `communal_keys` is the indoor half and keeps its old name so an
+    # existing client does not break.
     communal_keys: list[str]
+    outdoor_keys: list[str]
     residential_keys: list[str]
     corridor_width_cm: float
     core_size_cm: float

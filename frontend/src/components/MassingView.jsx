@@ -1,18 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import { KIND_COLOR, KIND_FALLBACK, applySceneTheme, sceneTheme } from "../theme";
 
 // The engine works in centimetres; three.js is happier around unit
 // scale, so everything is divided by 100 on the way into the scene.
 const CM_TO_M = 0.01;
-
-const KIND_COLOR = {
-  corridor: 0xc9cec7,
-  core: 0x9aa196,
-  unit: 0xeceee9,
-  communal: 0xd7dbd0,
-  room: 0xdfe3dc,
-};
 
 // Growth animation timing. STEP_STRIDE is the gap between consecutive
 // growth steps STARTING; BLOCK_RISE is how long one step takes to reach
@@ -46,7 +39,7 @@ function applyGrowth(item, p) {
   item.edges.visible = on;
 }
 
-export default function MassingView({ massing, animate = true }) {
+export default function MassingView({ massing, animate = true, theme = "light" }) {
   const mountRef = useRef(null);
   const stateRef = useRef(null);
   const animRef = useRef(null);
@@ -61,8 +54,6 @@ export default function MassingView({ massing, animate = true }) {
     if (!mount) return undefined;
 
     const scene = new THREE.Scene();
-    const dark = window.matchMedia?.("(prefers-color-scheme: dark)").matches;
-    scene.background = new THREE.Color(dark ? 0x1a1a19 : 0xfbfcfb);
 
     const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 5000);
     camera.position.set(40, 40, 40);
@@ -75,8 +66,12 @@ export default function MassingView({ massing, animate = true }) {
     controls.enableDamping = true;
     controls.dampingFactor = 0.08;
 
-    scene.add(new THREE.AmbientLight(0xffffff, dark ? 1.5 : 2.1));
-    const key = new THREE.DirectionalLight(0xffffff, dark ? 1.6 : 2.0);
+    // Base intensities, i.e. what these are at lightScale 1. The theme
+    // effect below scales them; it cannot read them back off the lights
+    // afterwards without compounding, so they are recorded here.
+    const ambient = new THREE.AmbientLight(0xffffff, 2.1);
+    scene.add(ambient);
+    const key = new THREE.DirectionalLight(0xffffff, 2.0);
     key.position.set(30, 60, 20);
     scene.add(key);
     const rim = new THREE.DirectionalLight(0xffffff, 0.5);
@@ -85,9 +80,6 @@ export default function MassingView({ massing, animate = true }) {
 
     const group = new THREE.Group();
     scene.add(group);
-
-    const grid = new THREE.GridHelper(200, 40, dark ? 0x383835 : 0xc3c2b7, dark ? 0x2c2c2a : 0xdfe2df);
-    scene.add(grid);
 
     let raf;
     const tick = () => {
@@ -133,7 +125,14 @@ export default function MassingView({ massing, animate = true }) {
     const ro = new ResizeObserver(resize);
     ro.observe(mount);
 
-    stateRef.current = { scene, camera, controls, group, renderer };
+    stateRef.current = {
+      scene, camera, controls, group, renderer, grid: null,
+      lights: [
+        { light: ambient, base: 2.1 },
+        { light: key, base: 2.0 },
+        { light: rim, base: 0.5 },
+      ],
+    };
 
     return () => {
       cancelAnimationFrame(raf);
@@ -146,7 +145,17 @@ export default function MassingView({ massing, animate = true }) {
     };
   }, []);
 
-  // Rebuild only the geometry when the massing changes.
+  // Background, ground grid and light levels follow the theme. Declared
+  // AFTER the effect above so it runs after it on mount -- both are in
+  // the same flush, so the first composited frame already has the right
+  // colours and a dark user sees no white flash.
+  useEffect(() => {
+    if (stateRef.current) applySceneTheme(THREE, stateRef.current, theme);
+  }, [theme]);
+
+  // Rebuild only the geometry when the massing changes. Deliberately NOT
+  // on `theme`: a theme change recolours the edges in place, above, so
+  // toggling light/dark does not restart the growth animation.
   useEffect(() => {
     const st = stateRef.current;
     if (!st || !massing) return;
@@ -159,7 +168,7 @@ export default function MassingView({ massing, animate = true }) {
     }
 
     const box = new THREE.Box3();
-    const edgeColor = window.matchMedia?.("(prefers-color-scheme: dark)").matches ? 0x000000 : 0x6f6f6a;
+    const edgeColor = sceneTheme(theme).edge;
 
     const items = [];
     // growth_step, not array order: a branch corridor is appended after
@@ -177,7 +186,7 @@ export default function MassingView({ massing, animate = true }) {
 
       const geo = new THREE.BoxGeometry(w, h, d);
       const mat = new THREE.MeshLambertMaterial({
-        color: KIND_COLOR[b.kind] ?? 0xdddddd,
+        color: KIND_COLOR[b.kind] ?? KIND_FALLBACK,
       });
       const mesh = new THREE.Mesh(geo, mat);
       // three.js is Y-up; the engine is Z-up, so engine y maps to -z.
@@ -250,7 +259,7 @@ export default function MassingView({ massing, animate = true }) {
 
   return (
     <div className="viewport">
-      <div ref={mountRef} style={{ width: "100%", height: "min(66vh, 640px)" }} />
+      <div ref={mountRef} className="canvas-mount" />
       <div className="hint">
         <span>Drag to orbit · scroll to zoom · right-drag to pan</span>
         <span className="growth">

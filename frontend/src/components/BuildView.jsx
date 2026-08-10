@@ -11,6 +11,7 @@ import {
   frameDuration,
   prefersReducedMotion,
 } from "./frameInstances";
+import { KIND_COLOR, KIND_FALLBACK, applySceneTheme, sceneTheme } from "../theme";
 
 // The whole point of this view: the massing volume arrives FIRST, then
 // the real timber components colonise it. Both are drawn in one scene
@@ -32,14 +33,6 @@ const GHOST_MS = 600;
 // What the volume fades to. Low enough to read the timber through it,
 // high enough that the envelope is still legible as a volume.
 const GHOST_OPACITY = 0.12;
-
-const KIND_COLOR = {
-  corridor: 0xc9cec7,
-  core: 0x9aa196,
-  unit: 0xeceee9,
-  communal: 0xd7dbd0,
-  room: 0xdfe3dc,
-};
 
 const pad = (n) => String(n).padStart(2, "0");
 
@@ -64,13 +57,19 @@ function applyGrowth(item, p) {
 // the fade starts: a translucent box that still writes depth would hide
 // the timber growing inside it, which is the one thing this view exists
 // to show.
+//
+// Outdoor pads do NOT fade. The ghost means "this volume is about to be
+// replaced by the timber that fills it" — and nothing fills a garden,
+// so fading it would just delete the open space from the finished view
+// with no member arriving to take its place.
 function applyGhost(item, g) {
+  if (item.solid) return;
   item.mesh.material.opacity = 1 - (1 - GHOST_OPACITY) * g;
   item.mesh.material.depthWrite = g <= 0.001;
   item.edges.material.opacity = 0.35 - 0.07 * g;
 }
 
-export default function BuildView({ massing, frame, animate = true }) {
+export default function BuildView({ massing, frame, animate = true, theme = "light" }) {
   const mountRef = useRef(null);
   const stateRef = useRef(null);
   const animRef = useRef(null);
@@ -82,8 +81,6 @@ export default function BuildView({ massing, frame, animate = true }) {
     if (!mount) return undefined;
 
     const scene = new THREE.Scene();
-    const dark = window.matchMedia?.("(prefers-color-scheme: dark)").matches;
-    scene.background = new THREE.Color(dark ? 0x1a1a19 : 0xfbfcfb);
 
     const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 5000);
     camera.position.set(40, 30, 40);
@@ -96,8 +93,11 @@ export default function BuildView({ massing, frame, animate = true }) {
     controls.enableDamping = true;
     controls.dampingFactor = 0.08;
 
-    scene.add(new THREE.AmbientLight(0xffffff, dark ? 1.4 : 1.9));
-    const key = new THREE.DirectionalLight(0xfff3e2, dark ? 1.7 : 2.0);
+    // Base intensities, i.e. what these are at lightScale 1 -- the theme
+    // effect scales them and cannot recover the base from the light.
+    const ambient = new THREE.AmbientLight(0xffffff, 1.9);
+    scene.add(ambient);
+    const key = new THREE.DirectionalLight(0xfff3e2, 2.0);
     key.position.set(30, 60, 20);
     scene.add(key);
     const rim = new THREE.DirectionalLight(0xdfe6ff, 0.55);
@@ -106,9 +106,6 @@ export default function BuildView({ massing, frame, animate = true }) {
 
     const group = new THREE.Group();
     scene.add(group);
-
-    const grid = new THREE.GridHelper(200, 40, dark ? 0x383835 : 0xc3c2b7, dark ? 0x2c2c2a : 0xdfe2df);
-    scene.add(grid);
 
     let raf;
     const tick = () => {
@@ -144,7 +141,14 @@ export default function BuildView({ massing, frame, animate = true }) {
     const ro = new ResizeObserver(resize);
     ro.observe(mount);
 
-    stateRef.current = { scene, camera, controls, group, renderer };
+    stateRef.current = {
+      scene, camera, controls, group, renderer, grid: null,
+      lights: [
+        { light: ambient, base: 1.9 },
+        { light: key, base: 2.0 },
+        { light: rim, base: 0.55 },
+      ],
+    };
 
     return () => {
       cancelAnimationFrame(raf);
@@ -156,6 +160,13 @@ export default function BuildView({ massing, frame, animate = true }) {
       animRef.current = null;
     };
   }, []);
+
+  // Background, ground grid and light levels follow the theme. Declared
+  // after the effect above so it runs after it on mount, in the same
+  // flush -- the first composited frame already has the right colours.
+  useEffect(() => {
+    if (stateRef.current) applySceneTheme(THREE, stateRef.current, theme);
+  }, [theme]);
 
   useEffect(() => {
     const st = stateRef.current;
@@ -169,7 +180,7 @@ export default function BuildView({ massing, frame, animate = true }) {
     }
 
     const box = new THREE.Box3();
-    const edgeColor = window.matchMedia?.("(prefers-color-scheme: dark)").matches ? 0x000000 : 0x6f6f6a;
+    const edgeColor = sceneTheme(theme).edge;
 
     // --- the volume ---------------------------------------------------
     const blocks = [];
@@ -187,7 +198,7 @@ export default function BuildView({ massing, frame, animate = true }) {
       // material to transparent mid-animation recompiles its shader and
       // drops a frame right at the moment the fade should be smooth.
       const mat = new THREE.MeshLambertMaterial({
-        color: KIND_COLOR[b.kind] ?? 0xdddddd,
+        color: KIND_COLOR[b.kind] ?? KIND_FALLBACK,
         transparent: true,
         opacity: 1,
       });
@@ -209,7 +220,10 @@ export default function BuildView({ massing, frame, animate = true }) {
       group.add(edges);
 
       const step = b.growth_step ?? 0;
-      blocks.push({ mesh, edges, y0, h, start: step * MASS_STRIDE_MS });
+      blocks.push({
+        mesh, edges, y0, h, start: step * MASS_STRIDE_MS,
+        solid: b.kind === "outdoor",
+      });
       // A duplex's rooms share their unit's step, so the first label
       // seen for a step is the thing that step actually builds.
       if (massLabels[step] === undefined) massLabels[step] = b.label;
@@ -273,7 +287,7 @@ export default function BuildView({ massing, frame, animate = true }) {
 
   return (
     <div className="viewport">
-      <div ref={mountRef} style={{ width: "100%", height: "min(66vh, 640px)" }} />
+      <div ref={mountRef} className="canvas-mount" />
       <div className="hint">
         <span>Drag to orbit · scroll to zoom · right-drag to pan</span>
         <span className="growth">

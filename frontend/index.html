@@ -4,6 +4,35 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>LinX Growth Engine</title>
+    <!-- Jost is the LinX Massing Engine face (UI-STYLE-SPEC.md). The
+         'Century Gothic' / 'Avenir Next' fallbacks in the CSS stack are
+         geometric sans too, so a failed font fetch degrades in shape
+         rather than jumping to a default grotesque. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Jost:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <!-- Resolve the theme BEFORE first paint. React does the same thing
+         in useTheme, but it does it after hydration, which on a dark
+         setup is one white flash too late. Deliberately blocking and
+         deliberately tiny. -->
+    <script>
+      (function () {
+        try {
+          var saved = localStorage.getItem("linx-theme");
+          var mode = saved === "light" || saved === "dark" ? saved : "auto";
+          var dark =
+            mode === "dark" ||
+            (mode === "auto" &&
+              window.matchMedia("(prefers-color-scheme: dark)").matches);
+          document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
+        } catch (e) {
+          document.documentElement.setAttribute("data-theme", "light");
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

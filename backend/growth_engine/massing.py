@@ -17,6 +17,10 @@ from .geometry import Point, normalize
 from .growth import FloorPlan, PlacedElement
 from .catalog import get_unit
 
+# One storey. Nothing here reads it any more -- every element carries its
+# own height and this module uses that -- but it is the documented value
+# of a storey in this package, matching growth.LEVEL_HEIGHT_CM and
+# frame.STOREY_CM, and callers extruding their own boxes still want it.
 DEFAULT_FLOOR_HEIGHT_CM = 300.0
 
 
@@ -52,7 +56,11 @@ def generate_massing(plan: FloorPlan, base_z: float = 0.0) -> list[MassingBlock]
     interior room breakdown for units that have it."""
     blocks = []
     for idx, el in enumerate(plan.elements):
-        height = el.height_cm if el.kind == "unit" else DEFAULT_FLOOR_HEIGHT_CM
+        # The element's own height, always. This used to special-case
+        # units and give everything else DEFAULT_FLOOR_HEIGHT_CM, which
+        # was the same number for every kind that existed then -- but an
+        # outdoor area is a 15cm pad, not a storey, and extruding it to
+        # 300 would put a green block where the ground is.
         # el.z0 is the element's own storey; base_z shifts the whole
         # building. A duplex's z0 is still its LOWER floor -- its extra
         # height is already in height_cm.
@@ -62,7 +70,7 @@ def generate_massing(plan: FloorPlan, base_z: float = 0.0) -> list[MassingBlock]
             label=el.label,
             base_corners=el.corners,
             z0=z0,
-            z1=z0 + height,
+            z1=z0 + el.height_cm,
             element_index=idx,
             growth_step=el.growth_step,
         ))
@@ -112,10 +120,9 @@ def generate_room_massing(plan: FloorPlan, base_z: float = 0.0) -> list[MassingB
                         growth_step=el.growth_step,
                     ))
                 continue
-        height = el.height_cm if el.kind == "unit" else DEFAULT_FLOOR_HEIGHT_CM
         blocks.append(MassingBlock(
             kind=el.kind, label=el.label, base_corners=el.corners,
-            z0=base_z + el.z0, z1=base_z + el.z0 + height,
+            z0=base_z + el.z0, z1=base_z + el.z0 + el.height_cm,
             element_index=idx, growth_step=el.growth_step,
         ))
     return blocks
