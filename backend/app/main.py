@@ -38,6 +38,7 @@ from growth_engine.facade import (
 from growth_engine.frame import GRID_CM
 from growth_engine.facade_import import load_facades
 from growth_engine.solar import apply_solar
+from growth_engine.site_grid import analyse
 from growth_engine.site.location import DEFAULT_SITE, site_fit
 from growth_engine.site.location import _area as _poly_area
 from growth_engine.preview import render_svg
@@ -65,6 +66,7 @@ from .schemas import (
     SegmentOut,
     SharedSegment,
     SharedSpaceInfo,
+    SiteGridResponse,
     SiteResponse,
     UnitInfo,
     WallOut,
@@ -370,6 +372,41 @@ def site(inset_m: float = 6.0) -> SiteResponse:
         boundary_cm=[[round(x, 1), round(y, 1)] for x, y in s.boundary_cm(inset_m)],
         centreline_cm=[[round(x, 1), round(y, 1)] for x, y in s.boundary_cm(0.0)],
         source=s.source, notes=list(s.notes),
+    )
+
+
+@app.get("/api/site/grid", response_model=SiteGridResponse)
+def site_grid(inset_m: float = 6.0, resolution_cm: float = 360.0,
+              spacing_cm: float = 360.0) -> SiteGridResponse:
+    """The candidate grids the site's own edges give, and the seam where
+    one hands over to the other."""
+    s = DEFAULT_SITE
+    names = ["Coffey St", "Deptford Church St", "Crossfield St"]
+    d = analyse(s.boundary(inset_m), names,
+                resolution_m=resolution_cm / 100.0,
+                spacing_m=spacing_cm / 100.0)
+
+    # Everything crosses the wire in cm relative to the ENTRANCE, so it
+    # lands on the same frame as the plan. site_grid works in metres from
+    # the site origin, so this is the one place they are reconciled.
+    ox, oy = s.origin_m
+
+    def to_cm_xy(x, y):
+        return [round((x - ox) * 100, 1), round((y - oy) * 100, 1)]
+
+    for fam in d["families"]:
+        fam["lines_cm"] = [
+            [*to_cm_xy(a, b), *to_cm_xy(c, e)]
+            for a, b, c, e in fam.pop("lines_m")
+        ]
+    cells = [
+        {"c": to_cm_xy(c["x"], c["y"]), "f": c["f"], "seam": c["seam"]}
+        for c in d["cells"]
+    ]
+    return SiteGridResponse(
+        resolution_cm=resolution_cm, spacing_cm=spacing_cm,
+        axes=d["axes"], separations=d["separations"], families=d["families"],
+        cells=cells, seam_cells=d["seam_cells"], total_cells=d["total_cells"],
     )
 
 

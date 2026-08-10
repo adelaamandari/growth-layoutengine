@@ -15,7 +15,12 @@ const fmt = (v, d = 1) =>
 // one above, the way a maisonette's upper part is drawn.
 const floorsOf = (el) => Math.max(1, Math.round((el.height_cm ?? 300) / 300));
 
-export default function PlanView({ plan, layers, level = 0, site = null }) {
+// One hue per grid family, matching the colours in Adela's grid
+// extraction sketch: the orthogonal street grid warm, the diagonal
+// Crossfield grid violet, so the two systems are told apart at a glance.
+const FAMILY_STROKE = ["#eb6834", "#8a6fd6", "#2a78d6"];
+
+export default function PlanView({ plan, layers, level = 0, site = null, grid = null }) {
   const svgRef = useRef(null);
   const wrapRef = useRef(null);
   const [tip, setTip] = useState(null);
@@ -153,6 +158,36 @@ export default function PlanView({ plan, layers, level = 0, site = null }) {
             >
               <title>Developable boundary at {site.inset_m} m setback — {site.developable_area_m2} m²</title>
             </polygon>
+          </g>
+        )}
+
+        {/* The grid the SITE gives, not the one the engine brings: one
+            lattice per family, clipped to the plot, plus the cells on
+            the seam where one family hands over to the other. Drawn
+            above the site fill and below everything built. */}
+        {layers.grid && grid && (
+          <g>
+            {grid.families.map((f, fi) => (
+              <g key={`gf${fi}`} stroke={FAMILY_STROKE[fi % FAMILY_STROKE.length]}
+                 strokeOpacity="0.5">
+                {f.lines_cm.map((l, i) => (
+                  // vectorEffect is a per-shape presentation attribute and
+                  // does NOT inherit from the group. On the group it is
+                  // silently ignored, leaving strokeWidth at 1 USER unit —
+                  // one centimetre — which draws an invisible hairline.
+                  <line key={i} x1={l[0]} y1={-l[1]} x2={l[2]} y2={-l[3]}
+                        strokeWidth="1" vectorEffect="non-scaling-stroke" />
+                ))}
+              </g>
+            ))}
+            {/* The seam is the whole point of running two grids, and it
+                is where the awkward junction will have to be detailed —
+                so it is marked rather than left to be inferred. */}
+            {grid.cells.filter((c) => c.seam).map((c, i) => (
+              <circle key={`sm${i}`} cx={c.c[0]} cy={-c.c[1]}
+                      r={grid.resolution_cm * 0.16}
+                      fill="var(--warn)" fillOpacity="0.5" />
+            ))}
           </g>
         )}
 

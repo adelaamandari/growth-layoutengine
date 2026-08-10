@@ -1,6 +1,6 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react";
 import {
-  download, getCatalog, getFacade, getFacadeCatalog, getFrame, getMassing, getPlan, getSite,
+  download, getCatalog, getFacade, getFacadeCatalog, getFrame, getMassing, getPlan, getSite, getSiteGrid,
 } from "./api";
 import PlanView from "./components/PlanView";
 import ProgramEditor from "./components/ProgramEditor";
@@ -52,6 +52,8 @@ export default function App() {
   const [facadeCatalog, setFacadeCatalog] = useState(null);
   // The real plot the project sits on. Static, so fetched once.
   const [site, setSite] = useState(null);
+  // The grid read off the site's own edges. Static, so fetched once.
+  const [grid, setGrid] = useState(null);
   const [facade, setFacade] = useState(null);
   const [showMassing, setShowMassing] = useState(true);
   // The timber frame behind the panels. On by default: the panel module
@@ -96,7 +98,7 @@ export default function App() {
   const [error, setError] = useState(null);
   const [layers, setLayers] = useState({
     fills: true, rooms: true, walls: true, nodes: true, labels: true,
-    shared: false, below: true, site: true,
+    shared: false, below: true, site: true, grid: false,
   });
   // Which storey the plan draws. The plan stacks now, so drawing every
   // level at once would just overlay them.
@@ -113,6 +115,7 @@ export default function App() {
       setFacadeCatalog({ error: e.message })
     );
     getSite().then(setSite).catch(() => setSite(null));
+    getSiteGrid().then(setGrid).catch(() => setGrid(null));
   }, []);
 
   const regenerate = useCallback(async () => {
@@ -440,7 +443,7 @@ export default function App() {
             )}
           </div>
 
-          {tab === "plan" && <PlanView plan={plan} layers={layers} level={level} site={site} />}
+          {tab === "plan" && <PlanView plan={plan} layers={layers} level={level} site={site} grid={grid} />}
           {tab !== "plan" && (
             <Suspense fallback={<div className="viewport" style={{ padding: 20 }}><span className="muted">Loading 3D view…</span></div>}>
               {tab === "massing" && <MassingView massing={massing} animate={animateGrowth} theme={theme} />}

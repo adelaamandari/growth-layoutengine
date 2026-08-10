@@ -45,6 +45,14 @@ export async function getSite() {
   return res.json();
 }
 
+// The grid read off the site's own edges, and the seam between the two
+// families. Static for a given resolution, so fetched once.
+export async function getSiteGrid() {
+  const res = await fetch("/api/site/grid");
+  if (!res.ok) throw new Error("Could not load the site grid.");
+  return res.json();
+}
+
 // The nine panel types and their member geometry. Static — fetched once
 // alongside the unit catalog, not on every regenerate, because it is
 // ~200KB that does not depend on the program.

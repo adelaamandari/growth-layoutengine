@@ -299,6 +299,24 @@ class SiteResponse(BaseModel):
     notes: list[str]
 
 
+class SiteGridResponse(BaseModel):
+    """The grid read OFF the site — see growth_engine.site_grid.
+
+    Geometry is in CENTIMETRES relative to the entrance, like the rest of
+    the plan, so it overlays the floor plan directly."""
+    resolution_cm: float
+    spacing_cm: float
+    axes: list[dict]
+    # Acute angle between each pair, folded to 0..90: two axes 89° apart
+    # describe the SAME grid, so this reports 1°, not 89°.
+    separations: list[dict]
+    # Each family carries its clipped lattice as [[x0,y0,x1,y1], …] cm.
+    families: list[dict]
+    cells: list[dict]
+    seam_cells: int
+    total_cells: int
+
+
 class SharedSpaceInfo(BaseModel):
     """One flexible program entry. Unlike a UnitInfo these are RANGES,
     because a shared space has a brief rather than a survey -- the
