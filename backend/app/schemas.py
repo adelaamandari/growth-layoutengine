@@ -62,6 +62,16 @@ class PlanRequest(BaseModel):
     # Keep growth inside the real site. On by default: the project has a
     # plot, and a building that ignores it is a different drawing.
     constrain_to_site: bool = True
+    # "branch" is the original growth: entrance inside the plot, spine,
+    # core, three orthogonal arms. "site" is the perimeter-block strategy
+    # that enters from the street and lays out on the grids the plot's
+    # own edges give. See growth_engine.growth_site.
+    strategy: str = "branch"
+    # Which boundary edge the entrance sits on, for strategy="site".
+    # 1 is Deptford Church Street, the main road.
+    entrance_edge: int = 1
+    # Cell size for the residual/green pass, cm.
+    grid_resolution_cm: float = 90.0
     # Setback from the street centrelines the boundary is measured on.
     site_inset_m: float = 6.0
 

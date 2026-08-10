@@ -68,6 +68,9 @@ export default function App() {
   // Keep growth inside the real plot. On by default — the project has a
   // site, and a building that ignores it is a different drawing.
   const [constrainToSite, setConstrainToSite] = useState(true);
+  // "branch" is the original cross-shaped growth; "site" enters from the
+  // street and lays perimeter blocks on the grids the plot's edges give.
+  const [strategy, setStrategy] = useState("branch");
   // Isolate one panel type in the facade view, to read where it lands.
   const [onlyPanel, setOnlyPanel] = useState("");
   const [program, setProgram] = useState(DEFAULT_PROGRAM);
@@ -122,7 +125,7 @@ export default function App() {
     setBusy(true);
     setError(null);
     try {
-      const req = { program, seed, per_room: perRoom, constrain_to_site: constrainToSite };
+      const req = { program, seed, per_room: perRoom, constrain_to_site: constrainToSite, strategy };
       // The plan is deterministic in (program, seed), so asking the
       // frame endpoint twice returns two readings of the SAME building
       // -- the structural frame, and that frame with its walls filled.
@@ -141,7 +144,7 @@ export default function App() {
     } finally {
       setBusy(false);
     }
-  }, [program, seed, perRoom, jointBlocks, courseCm, align, constrainToSite]);
+  }, [program, seed, perRoom, jointBlocks, courseCm, align, constrainToSite, strategy]);
 
   useEffect(() => { if (catalog) regenerate(); }, [catalog, regenerate]);
 
@@ -245,6 +248,14 @@ export default function App() {
               range — every residential unit places deterministically. The program
               above is the real input.
             </p>
+            <label className="muted" style={{ display: "block", marginBottom: 8 }}>
+              strategy{" "}
+              <select className="field" value={strategy}
+                      onChange={(e) => setStrategy(e.target.value)}>
+                <option value="branch">branch · spine + arms</option>
+                <option value="site">site · perimeter blocks</option>
+              </select>
+            </label>
             <label className="muted" style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
               <input type="checkbox" checked={constrainToSite}
                      onChange={(e) => setConstrainToSite(e.target.checked)} />
@@ -253,6 +264,9 @@ export default function App() {
             <div className="btn-row">
               <button className="btn primary" onClick={regenerate} disabled={busy || !catalog}>
                 {busy ? "Generating…" : "Regenerate"}
+              </button>
+              <button className="btn" onClick={() => setSeed(Math.floor(Math.random() * 100000))}>
+                Randomize
               </button>
               <button className="btn" onClick={() => setProgram(DEFAULT_PROGRAM)}>Reset</button>
             </div>
