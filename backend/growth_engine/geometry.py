@@ -104,6 +104,23 @@ def point_in_polygon(p: Point, poly: Sequence[Point]) -> bool:
     return inside
 
 
+def polygon_area(poly: Sequence[Point]) -> float:
+    """Plan area by the shoelace formula.
+
+    Bounding-box area was fine while every footprint was an axis-aligned
+    rectangle -- the box WAS the shape. The site strategy rotates
+    elements to follow the street they front, and a bounding box then
+    over-reports: a 10x4m unit at 58 degrees has a box about three times
+    its area, so a building would appear to GAIN floor area by turning.
+    """
+    s = 0.0
+    n = len(poly)
+    for i in range(n):
+        a, b = poly[i], poly[(i + 1) % n]
+        s += a.x * b.y - b.x * a.y
+    return abs(s) / 2
+
+
 def _orient(p: Point, q: Point, r: Point) -> int:
     v = (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x)
     if abs(v) < 1e-9:

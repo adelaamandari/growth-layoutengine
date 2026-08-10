@@ -3,6 +3,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { CM_TO_M, buildFrameInstances } from "./frameInstances";
 import { KIND_COLOR, KIND_FALLBACK, applySceneTheme, sceneTheme } from "../theme";
+import { prismGeometry } from "./prism";
 
 // Heatmap ramp for sun received: cool blue (least) through to a warm
 // yellow (most). Sequential and monotonic in lightness, so it still
@@ -219,18 +220,14 @@ export default function FacadeView({
         const h = (b.z1 - b.z0) * CM_TO_M;
         if (w <= 0 || d <= 0 || h <= 0) continue;
         const mesh = new THREE.Mesh(
-          new THREE.BoxGeometry(w, h, d),
+          prismGeometry(b.base_corners, b.z1 - b.z0),
           new THREE.MeshLambertMaterial({
             color: KIND_COLOR[b.kind] ?? KIND_FALLBACK,
             transparent: true, opacity: b.kind === "outdoor" ? 1 : 0.22,
             depthWrite: b.kind === "outdoor",
           })
         );
-        mesh.position.set(
-          Math.min(...xs) * CM_TO_M + w / 2,
-          b.z0 * CM_TO_M + h / 2,
-          -(Math.min(...ys) * CM_TO_M + d / 2)
-        );
+        mesh.position.y = b.z0 * CM_TO_M;
         group.add(mesh);
         box.expandByObject(mesh);
       }

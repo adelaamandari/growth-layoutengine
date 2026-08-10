@@ -45,6 +45,7 @@ from growth_engine.site.location import _area as _poly_area
 from growth_engine.preview import render_svg
 
 from growth_engine.diagnostics import shared_boundaries, verify_walls, wall_length
+from growth_engine.geometry import polygon_area as _poly_area_pts
 
 from .schemas import (
     RESIDENTIAL,
@@ -267,10 +268,13 @@ def plan(req: PlanRequest) -> PlanResponse:
     footprint = 0.0
     floor_area = 0.0
     outdoor_area = 0.0
-    for e in elements:
-        ex = [c[0] for c in e.corners]
-        ey = [c[1] for c in e.corners]
-        area = (max(ex) - min(ex)) * (max(ey) - min(ey)) / 10000
+    # Zipped against fp.elements because the shoelace needs Points, and
+    # `elements` has already been flattened to lists for the wire.
+    for el, e in zip(fp.elements, elements):
+        # Shoelace, not the bounding box -- see geometry.polygon_area.
+        # A rotated element's box over-reports it, which would credit the
+        # scheme with floor area it does not have.
+        area = _poly_area_pts(el.corners) / 10000
         if e.kind == "outdoor":
             outdoor_area += area
             continue

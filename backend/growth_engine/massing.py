@@ -13,7 +13,7 @@ function below.
 from __future__ import annotations
 from dataclasses import dataclass
 
-from .geometry import Point, normalize
+from .geometry import Point, normalize, polygon_area
 from .growth import FloorPlan, PlacedElement
 from .catalog import get_unit
 
@@ -134,9 +134,7 @@ def massing_summary(blocks: list[MassingBlock]) -> dict:
     for b in blocks:
         entry = summary.setdefault(b.kind, {"count": 0, "footprint_area_m2": 0.0})
         entry["count"] += 1
-        xs = [c.x for c in b.base_corners]
-        ys = [c.y for c in b.base_corners]
-        width = max(xs) - min(xs)
-        depth = max(ys) - min(ys)
-        entry["footprint_area_m2"] += (width * depth) / 10000  # cm^2 -> m^2
+        # True plan area, not the bounding box: elements are rotated
+        # under the site strategy and a box over-reports them.
+        entry["footprint_area_m2"] += polygon_area(b.base_corners) / 10000
     return summary

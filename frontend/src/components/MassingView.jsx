@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { KIND_COLOR, KIND_FALLBACK, applySceneTheme, sceneTheme } from "../theme";
+import { prismGeometry } from "./prism";
 
 // The engine works in centimetres; three.js is happier around unit
 // scale, so everything is divided by 100 on the way into the scene.
@@ -29,11 +30,11 @@ function applyGrowth(item, p) {
   // Exactly 0 makes the normal matrix degenerate and three.js warns, so
   // the floor is a hair above zero and visibility does the real hiding.
   const s = Math.max(p, 1e-4);
-  const y = item.y0 + (item.h * p) / 2;
+  // No position correction: the prism's base is already at its slab, so
+  // scaling y grows it upward from there. The old box was centred on
+  // itself and had to be lifted every frame to keep its underside put.
   item.mesh.scale.y = s;
-  item.mesh.position.y = y;
   item.edges.scale.y = s;
-  item.edges.position.y = y;
   const on = p > 0.001;
   item.mesh.visible = on;
   item.edges.visible = on;
@@ -184,25 +185,26 @@ export default function MassingView({ massing, animate = true, theme = "light" }
       const h = (b.z1 - b.z0) * CM_TO_M;
       if (w <= 0 || d <= 0 || h <= 0) continue;
 
-      const geo = new THREE.BoxGeometry(w, h, d);
+      // Extruded from the REAL corners, not a bounding box: elements are
+      // rotated under the site strategy and a box would draw them
+      // overlapping when they do not. See prism.js.
+      const geo = prismGeometry(b.base_corners, b.z1 - b.z0);
       const mat = new THREE.MeshLambertMaterial({
         color: KIND_COLOR[b.kind] ?? KIND_FALLBACK,
       });
       const mesh = new THREE.Mesh(geo, mat);
-      // three.js is Y-up; the engine is Z-up, so engine y maps to -z.
+      // The prism's base is at local y = 0, so this is the only place
+      // its height above ground is set -- and the growth animation can
+      // then scale y without correcting position.
       const y0 = b.z0 * CM_TO_M;
-      mesh.position.set(
-        (Math.min(...xs) * CM_TO_M) + w / 2,
-        y0 + h / 2,
-        -((Math.min(...ys) * CM_TO_M) + d / 2)
-      );
+      mesh.position.y = y0;
       group.add(mesh);
 
       const edges = new THREE.LineSegments(
         new THREE.EdgesGeometry(geo),
         new THREE.LineBasicMaterial({ color: edgeColor, transparent: true, opacity: 0.35 })
       );
-      edges.position.copy(mesh.position);
+      edges.position.y = y0;
       group.add(edges);
 
       // Older API responses have no growth_step; fall back to one step
