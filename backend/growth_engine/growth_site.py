@@ -364,6 +364,7 @@ def generate_spine_floorplan(program: list[str], site, seed: int | None = None,
                              resolution_cm: float = 90.0,
                              grid_family: int | None = None,
                              max_branch_cm: float = 4000.0,
+                             branch_depth: int = 2,
                              street_names=None) -> FloorPlan:
     """
     The SPINE, turned onto a site grid.
@@ -488,9 +489,12 @@ def generate_spine_floorplan(program: list[str], site, seed: int | None = None,
     # growth.py's own docstring says. Left at 1200 the spine stacked to
     # 13 storeys on a plot that comfortably holds the program across two
     # or three, because it hit the cap long before it hit the boundary.
+    # branch_depth 2 by default here: the tertiary runs are what make a
+    # spine on a deep plot reach past one unit either side of its arms.
     plan = generate_floorplan(built, seed=seed, boundary=ctx.boundary,
                               entrance=entrance, axes=(u_ax, v_ax),
-                              max_branch_cm=max_branch_cm)
+                              max_branch_cm=max_branch_cm,
+                              branch_depth=branch_depth)
 
     # Residual -> green. Appending is safe: outdoor elements build no
     # walls, so the resolved wall set and every existing element's

@@ -72,6 +72,10 @@ class PlanRequest(BaseModel):
     entrance_edge: int = 1
     # Cell size for the residual/green pass, cm.
     grid_resolution_cm: float = 90.0
+    # Orders of circulation. 1 is spine + arms; 2 adds the tertiary runs
+    # that cross the arms again, which is what lets a plan reach past one
+    # unit either side of a corridor. See growth._spawn_tertiary.
+    branch_depth: int = 2
     # Setback from the street centrelines the boundary is measured on.
     site_inset_m: float = 6.0
 

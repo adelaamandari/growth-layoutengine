@@ -377,9 +377,51 @@ def _make_branches(core_pos: Point, axes=None) -> list[dict]:
         pd_ = Point(-d.y, d.x)
         branches.append({
             "dir": d, "pd": pd_, "start": core_pos + d.scaled(CORE_HALF),
-            "offset_l": 0.0, "offset_r": 0.0,
+            "offset_l": 0.0, "offset_r": 0.0, "depth": 0,
         })
     return branches
+
+
+def _spawn_tertiary(branches: list[dict], pitch_cm: float,
+                    reach_cm: float) -> list[dict]:
+    """Sub-branches off the primary arms, perpendicular to them.
+
+    The third order of circulation: the spine runs one way, its arms
+    cross it, and these run back parallel to the spine again. That is
+    what turns three loose corridors into a network -- without them a
+    run can only ever be double-loaded, so the plan is a set of strips
+    and the depth of the plot beyond one unit either side of an arm is
+    unreachable.
+
+    Spawned UP FRONT, at a fixed pitch, not after the primaries have
+    filled. Spawning them late looked more informed -- their positions
+    could follow how far each arm actually ran -- but by then the strip a
+    tertiary corridor needs is full of the units that attached to its
+    parent's side, so the corridor was laid straight through them: eight
+    overlapping elements and a failed wall check. Created with the
+    primaries, every run competes through the same occupancy test and
+    the conflict cannot arise.
+
+    Both sides of every parent, at a fixed pitch. A tertiary starts on
+    the parent corridor's EDGE, not its centreline, so the two corridors
+    meet rather than overlap.
+    """
+    out: list[dict] = []
+    for br in branches:
+        if br.get("depth", 0) != 0:
+            continue                      # no fourth order
+        t = pitch_cm
+        while t <= reach_cm:
+            anchor = br["start"] + br["dir"].scaled(t)
+            for sign in (-1, 1):
+                d = br["pd"].scaled(sign)
+                out.append({
+                    "dir": d, "pd": Point(-d.y, d.x),
+                    "start": anchor + d.scaled(CORRIDOR_HALF),
+                    "offset_l": 0.0, "offset_r": 0.0, "depth": 1,
+                })
+            t += pitch_cm
+    return out
 
 
 def _grow_outdoor(elements, occupied, branches: list[dict], keys: list[str],
@@ -487,7 +529,9 @@ def generate_floorplan(program: list[str], seed: int | None = None,
                        max_levels: int = MAX_LEVELS,
                        boundary: list[Point] | None = None,
                        entrance: Point | None = None,
-                       axes: tuple[Point, Point] | None = None) -> FloorPlan:
+                       axes: tuple[Point, Point] | None = None,
+                       branch_depth: int = 1,
+                       tertiary_pitch_cm: float = 1200.0) -> FloorPlan:
     """
     program: ordered list of type keys to place, e.g.
         ["Lobby", "Studio_A", "SK", "2Bed_A", "Gym", "Garden"]
@@ -563,6 +607,9 @@ def generate_floorplan(program: list[str], seed: int | None = None,
         # topmost occupied one are pruned after the loop.
         _add_core(elements, occupied, core_pos, level=level, axes=(u_ax, v_ax))
         branches = _make_branches(core_pos, (u_ax, v_ax))
+        if branch_depth >= 2:
+            branches.extend(_spawn_tertiary(branches, tertiary_pitch_cm,
+                                            max_branch_cm))
         level_branches.append((level, branches))
 
         # Runs in the order they should fill: both sides of one branch
@@ -679,8 +726,14 @@ def generate_floorplan(program: list[str], seed: int | None = None,
     for level_i, branches in level_branches:
         for br in branches:
             total = max(br["offset_l"], br["offset_r"])
-            while total > 0 and not _on_site(
-                    _corridor_bay(br, 0.0, total), boundary):
+            # Trimmed back until it is BOTH on the site and clear of what
+            # is already built. The free test is new and matters for the
+            # tertiary runs: three corridors radiating from a core cannot
+            # foul each other, but a network of them can.
+            while total > 0 and not (
+                    _on_site(_corridor_bay(br, 0.0, total), boundary)
+                    and _is_free(occupied, level_i, 1,
+                                 _corridor_bay(br, 0.0, total))):
                 total -= PROBE_STEP_CM
             if total > 0:
                 _add_corridor(elements, occupied, br["start"],

@@ -68,6 +68,9 @@ export default function App() {
   // Keep growth inside the real plot. On by default — the project has a
   // site, and a building that ignores it is a different drawing.
   const [constrainToSite, setConstrainToSite] = useState(true);
+  // Orders of circulation: 1 is spine + arms, 2 adds the tertiary runs
+  // that cross the arms again.
+  const [subBranches, setSubBranches] = useState(true);
   // "branch" is the original cross-shaped growth; "site" enters from the
   // street and lays perimeter blocks on the grids the plot's edges give.
   const [strategy, setStrategy] = useState("branch");
@@ -125,7 +128,7 @@ export default function App() {
     setBusy(true);
     setError(null);
     try {
-      const req = { program, seed, per_room: perRoom, constrain_to_site: constrainToSite, strategy };
+      const req = { program, seed, per_room: perRoom, constrain_to_site: constrainToSite, strategy, branch_depth: subBranches ? 2 : 1 };
       // The plan is deterministic in (program, seed), so asking the
       // frame endpoint twice returns two readings of the SAME building
       // -- the structural frame, and that frame with its walls filled.
@@ -144,7 +147,7 @@ export default function App() {
     } finally {
       setBusy(false);
     }
-  }, [program, seed, perRoom, jointBlocks, courseCm, align, constrainToSite, strategy]);
+  }, [program, seed, perRoom, jointBlocks, courseCm, align, constrainToSite, strategy, subBranches]);
 
   useEffect(() => { if (catalog) regenerate(); }, [catalog, regenerate]);
 
@@ -261,6 +264,11 @@ export default function App() {
               <input type="checkbox" checked={constrainToSite}
                      onChange={(e) => setConstrainToSite(e.target.checked)} />
               keep inside the site
+            </label>
+            <label className="muted" style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
+              <input type="checkbox" checked={subBranches}
+                     onChange={(e) => setSubBranches(e.target.checked)} />
+              sub-branches
             </label>
             <div className="btn-row">
               <button className="btn primary" onClick={regenerate} disabled={busy || !catalog}>

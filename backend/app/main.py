@@ -112,6 +112,7 @@ def _build_plan(req: PlanRequest):
                 program=list(req.program), site=DEFAULT_SITE, seed=req.seed,
                 inset_m=req.site_inset_m, entrance_edge=req.entrance_edge,
                 resolution_cm=req.grid_resolution_cm,
+                branch_depth=req.branch_depth,
                 street_names=["Coffey St", "Deptford Church St", "Crossfield St"],
             )
         if req.strategy == "site":
@@ -125,7 +126,8 @@ def _build_plan(req: PlanRequest):
                 street_names=["Coffey St", "Deptford Church St", "Crossfield St"],
             )
         return generate_floorplan(program=list(req.program), seed=req.seed,
-                                  boundary=_site_boundary(req))
+                                  boundary=_site_boundary(req),
+                                  branch_depth=req.branch_depth)
     except KeyError as e:
         raise HTTPException(400, f"unknown unit type: {e}") from e
 
