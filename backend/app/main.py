@@ -39,7 +39,7 @@ from growth_engine.frame import GRID_CM
 from growth_engine.facade_import import load_facades
 from growth_engine.solar import apply_solar
 from growth_engine.site_grid import analyse
-from growth_engine.growth_site import generate_site_floorplan
+from growth_engine.growth_site import generate_site_floorplan, generate_spine_floorplan
 from growth_engine.site.location import DEFAULT_SITE, site_fit
 from growth_engine.site.location import _area as _poly_area
 from growth_engine.preview import render_svg
@@ -105,6 +105,15 @@ def _build_plan(req: PlanRequest):
     if not req.program:
         raise HTTPException(400, "program is empty")
     try:
+        if req.strategy == "spine":
+            # growth.py's own logic, re-based: entrance on a real street
+            # and the whole armature turned onto a site grid.
+            return generate_spine_floorplan(
+                program=list(req.program), site=DEFAULT_SITE, seed=req.seed,
+                inset_m=req.site_inset_m, entrance_edge=req.entrance_edge,
+                resolution_cm=req.grid_resolution_cm,
+                street_names=["Coffey St", "Deptford Church St", "Crossfield St"],
+            )
         if req.strategy == "site":
             # The site strategy takes the plot itself rather than a
             # boundary polygon: it needs the edges to read grids off, not

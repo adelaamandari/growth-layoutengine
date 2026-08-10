@@ -253,6 +253,7 @@ export default function App() {
               <select className="field" value={strategy}
                       onChange={(e) => setStrategy(e.target.value)}>
                 <option value="branch">branch · spine + arms</option>
+                <option value="spine">spine · on the site grid</option>
                 <option value="site">site · perimeter blocks</option>
               </select>
             </label>
@@ -460,7 +461,7 @@ export default function App() {
           {tab === "plan" && <PlanView plan={plan} layers={layers} level={level} site={site} grid={grid} />}
           {tab !== "plan" && (
             <Suspense fallback={<div className="viewport" style={{ padding: 20 }}><span className="muted">Loading 3D view…</span></div>}>
-              {tab === "massing" && <MassingView massing={massing} animate={animateGrowth} theme={theme} />}
+              {tab === "massing" && <MassingView massing={massing} animate={animateGrowth} theme={theme} site={site} />}
               {tab === "frame" && <FrameView frame={shownFrame} animate={animateGrowth} theme={theme} />}
               {tab === "build" && (
                 <BuildView massing={massing} frame={shownBuildFrame} animate={animateGrowth} theme={theme} />

@@ -84,3 +84,21 @@ export function polygonAreaM2(corners) {
   }
   return Math.abs(s) / 2 / 10_000;
 }
+
+/**
+ * The site boundary as a closed loop lying on the ground plane.
+ *
+ * Drawn at a hair above zero rather than exactly at it: the ground grid
+ * sits at y=0 too, and two coplanar surfaces z-fight into a flickering
+ * dashed mess as the camera moves.
+ */
+export function siteOutline(THREE, boundaryCm, color, opacity = 1) {
+  const pts = boundaryCm.map(
+    ([x, y]) => new THREE.Vector3(x * CM_TO_M, 0.02, -y * CM_TO_M)
+  );
+  pts.push(pts[0].clone());
+  return new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints(pts),
+    new THREE.LineBasicMaterial({ color, transparent: true, opacity })
+  );
+}

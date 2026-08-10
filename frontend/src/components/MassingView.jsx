@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { KIND_COLOR, KIND_FALLBACK, applySceneTheme, sceneTheme } from "../theme";
-import { prismGeometry } from "./prism";
+import { prismGeometry, siteOutline } from "./prism";
 
 // The engine works in centimetres; three.js is happier around unit
 // scale, so everything is divided by 100 on the way into the scene.
@@ -40,7 +40,7 @@ function applyGrowth(item, p) {
   item.edges.visible = on;
 }
 
-export default function MassingView({ massing, animate = true, theme = "light" }) {
+export default function MassingView({ massing, animate = true, theme = "light", site = null }) {
   const mountRef = useRef(null);
   const stateRef = useRef(null);
   const animRef = useRef(null);
@@ -171,6 +171,19 @@ export default function MassingView({ massing, animate = true, theme = "light" }
     const box = new THREE.Box3();
     const edgeColor = sceneTheme(theme).edge;
 
+    // The plot, on the ground. Two loops: the developable boundary the
+    // building actually has to sit inside, and the street centrelines
+    // faint behind it -- so the massing can be read against the plot it
+    // stands on rather than floating in an empty grid.
+    if (site) {
+      const green = 0x7d8a6a;
+      const outer = siteOutline(THREE, site.centreline_cm, green, 0.35);
+      const inner = siteOutline(THREE, site.boundary_cm, green, 0.9);
+      group.add(outer);
+      group.add(inner);
+      box.expandByObject(outer);
+    }
+
     const items = [];
     // growth_step, not array order: a branch corridor is appended after
     // the units on it (its length isn't known until they're placed) but
@@ -247,7 +260,7 @@ export default function MassingView({ massing, animate = true, theme = "light" }
       camera.updateProjectionMatrix();
       controls.update();
     }
-  }, [massing, animate]);
+  }, [massing, animate, site, theme]);
 
   const replay = useCallback(() => {
     const a = animRef.current;

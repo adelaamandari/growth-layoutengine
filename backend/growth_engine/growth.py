@@ -270,11 +270,21 @@ def _add_corridor(elements, occupied, seg_start: Point, seg_end: Point,
     _reserve(occupied, level, 1, corners)
 
 
-def _add_core(elements, occupied, core_pos: Point, level: int = 0):
-    c1 = Point(core_pos.x - CORE_HALF, core_pos.y - CORE_HALF)
-    c2 = Point(core_pos.x + CORE_HALF, core_pos.y - CORE_HALF)
-    c3 = Point(core_pos.x + CORE_HALF, core_pos.y + CORE_HALF)
-    c4 = Point(core_pos.x - CORE_HALF, core_pos.y + CORE_HALF)
+def _add_core(elements, occupied, core_pos: Point, level: int = 0, axes=None):
+    """The stair, square on the plan's own axes.
+
+    It used to build its square from hardcoded x/y offsets, which was
+    invisible while the whole plan was axis-aligned and wrong the moment
+    the frame could rotate: every corridor and room turned onto the site
+    grid and the core alone stayed square to the page, sitting askew in
+    the middle of its own building.
+    """
+    u, v = axes if axes else (Point(1.0, 0.0), Point(0.0, 1.0))
+    c1 = Point(core_pos.x - (u.x + v.x) * CORE_HALF,
+               core_pos.y - (u.y + v.y) * CORE_HALF)
+    c2 = Point(c1.x + u.x * CORE_SIZE_CM, c1.y + u.y * CORE_SIZE_CM)
+    c3 = Point(c2.x + v.x * CORE_SIZE_CM, c2.y + v.y * CORE_SIZE_CM)
+    c4 = Point(c1.x + v.x * CORE_SIZE_CM, c1.y + v.y * CORE_SIZE_CM)
     corners = _rect(c1, c2, c3, c4)
     elements.append(PlacedElement("core", "Core", corners, level=level))
     _reserve(occupied, level, 1, corners)
@@ -345,10 +355,20 @@ def _corridor_bay(br: dict, probe: float, length: float) -> list[Point]:
                  b + pd_.scaled(CORRIDOR_HALF), a + pd_.scaled(CORRIDOR_HALF))
 
 
-def _make_branches(core_pos: Point) -> list[dict]:
-    """The three orthogonal arms leaving the core: straight, left, right."""
+def _make_branches(core_pos: Point, axes=None) -> list[dict]:
+    """The three orthogonal arms leaving the core: straight, left, right.
+
+    `axes` is the frame the whole plan is laid out on: (u, v), a unit
+    pair with v the "north" the entry run comes down from and u the
+    cross direction. Default is the world frame, which is what this
+    engine always used. Passing a rotated pair turns the ENTIRE armature
+    onto a site grid without changing any of the growth logic -- the
+    branches are still orthogonal to each other, they are just no longer
+    orthogonal to the page.
+    """
+    u, v = axes if axes else (Point(1.0, 0.0), Point(0.0, 1.0))
     branches = []
-    for d in (Point(0, -1), Point(-1, 0), Point(1, 0)):
+    for d in (Point(-v.x, -v.y), Point(-u.x, -u.y), u):
         pd_ = Point(-d.y, d.x)
         branches.append({
             "dir": d, "pd": pd_, "start": core_pos + d.scaled(CORE_HALF),
@@ -460,7 +480,9 @@ def _resolve_walls_per_level(elements: list[PlacedElement]):
 def generate_floorplan(program: list[str], seed: int | None = None,
                        max_branch_cm: float = MAX_BRANCH_CM,
                        max_levels: int = MAX_LEVELS,
-                       boundary: list[Point] | None = None) -> FloorPlan:
+                       boundary: list[Point] | None = None,
+                       entrance: Point | None = None,
+                       axes: tuple[Point, Point] | None = None) -> FloorPlan:
     """
     program: ordered list of type keys to place, e.g.
         ["Lobby", "Studio_A", "SK", "2Bed_A", "Gym", "Garden"]
@@ -508,8 +530,14 @@ def generate_floorplan(program: list[str], seed: int | None = None,
     occupied: dict[int, list[list[Point]]] = {}
     unit_counts: dict[str, int] = {}
 
-    entrance = Point(0, 0)
-    entry_dir = Point(0, -1)
+    # The frame the plan is laid out on. Defaults to the world axes with
+    # the entrance at the origin, which is what this engine always did;
+    # passing either turns the whole armature without touching the growth
+    # logic below. `entrance` is where the front door is -- on a real
+    # site that belongs on a street, not at an arbitrary interior point.
+    u_ax, v_ax = axes if axes else (Point(1.0, 0.0), Point(0.0, 1.0))
+    entrance = entrance if entrance is not None else Point(0, 0)
+    entry_dir = Point(-v_ax.x, -v_ax.y)
     core_pos = entrance + entry_dir.scaled(ENTRY_CORRIDOR_BAYS_CM)
     # The entry run belongs to the ground floor only. Upper storeys
     # reach the branches through the core, which is the stair.
@@ -528,8 +556,8 @@ def generate_floorplan(program: list[str], seed: int | None = None,
         # building passes through -- including one that ends up holding
         # only the upper halves of the duplexes below. Storeys above the
         # topmost occupied one are pruned after the loop.
-        _add_core(elements, occupied, core_pos, level=level)
-        branches = _make_branches(core_pos)
+        _add_core(elements, occupied, core_pos, level=level, axes=(u_ax, v_ax))
+        branches = _make_branches(core_pos, (u_ax, v_ax))
         level_branches.append((level, branches))
 
         # Runs in the order they should fill: both sides of one branch
@@ -628,8 +656,8 @@ def generate_floorplan(program: list[str], seed: int | None = None,
     if outdoor_program:
         ground = next((brs for lv, brs in level_branches if lv == 0), None)
         if ground is None:
-            _add_core(elements, occupied, core_pos, level=0)
-            ground = _make_branches(core_pos)
+            _add_core(elements, occupied, core_pos, level=0, axes=(u_ax, v_ax))
+            ground = _make_branches(core_pos, (u_ax, v_ax))
             level_branches.append((0, ground))
         _grow_outdoor(elements, occupied, ground, outdoor_program,
                       unit_counts, max_branch_cm, boundary=boundary)

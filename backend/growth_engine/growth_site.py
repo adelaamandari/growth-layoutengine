@@ -55,6 +55,7 @@ from .catalog import get_unit
 from .geometry import Point, polygon_contains, polygons_overlap
 from .growth import (
     CORRIDOR_WIDTH_CM,
+    generate_floorplan,
     CORE_SIZE_CM,
     LEVEL_HEIGHT_CM,
     MAX_LEVELS,
@@ -356,6 +357,110 @@ def generate_site_floorplan(program: list[str], site, seed: int | None = None,
         level_count=max((el.level + el.floors for el in elements), default=1),
         boundary=boundary, off_site=off_site,
     )
+
+
+def generate_spine_floorplan(program: list[str], site, seed: int | None = None,
+                             inset_m: float = 6.0, entrance_edge: int = 1,
+                             resolution_cm: float = 90.0,
+                             grid_family: int | None = None,
+                             max_branch_cm: float = 4000.0,
+                             street_names=None) -> FloorPlan:
+    """
+    The SPINE, turned onto a site grid.
+
+    This is not a third morphology -- it is growth.py's own logic
+    (entrance, entry run, core, three orthogonal arms, rooms hung off
+    them) with two things changed:
+
+      the frame is ROTATED onto one of the grid families the site's
+        edges give, so the whole armature runs with the street instead
+        of with the page;
+      the entrance sits on a real frontage rather than at an interior
+        origin, so the building is entered from the street.
+
+    Everything else is the branch strategy exactly as verified -- the
+    stacking rule, shared-wall resolution, the boundary constraint. That
+    is the point of doing it this way: the spine reads the way Adela's
+    option 2 sketch does, and none of the growth logic had to be
+    reinvented to get it, only re-based.
+
+    Whatever the building does not take becomes green, the same residual
+    pass the perimeter strategy uses.
+
+    The seed varies where on the frontage the entrance sits AND which
+    grid family the building takes, weighted by how much frontage backs
+    each. So a randomize can hand back a street-aligned scheme or one
+    turned onto the Crossfield diagonal -- a real design variable rather
+    than a jitter.
+    """
+    if seed is not None:
+        random.seed(seed)
+
+    ctx = build_context(site, inset_m, street_names)
+
+    if grid_family is None:
+        weights = [f.support_m for f in ctx.families]
+        total = sum(weights)
+        pick = random.random() * total
+        grid_family = 0
+        for i, w in enumerate(weights):
+            pick -= w
+            if pick <= 0:
+                grid_family = i
+                break
+    fam = ctx.families[min(grid_family, len(ctx.families) - 1)]
+
+    # The plan's own axes. v is the direction the entry run comes DOWN
+    # from, so it must point INTO the site from the entrance frontage,
+    # not merely along the family -- otherwise the spine drives straight
+    # out through the street it just entered from.
+    ux, uy = fam.u
+    a, edge_u, edge_n, length = _edge_frame(ctx, entrance_edge)
+    u_ax = Point(ux, uy)
+    v_ax = Point(-uy, ux)
+    # growth.py takes entry_dir = -v, so -v is what has to point INTO the
+    # plot: dot(-v, inward normal) > 0, i.e. dot(v, n) < 0. ONE condition.
+    # Getting this wrong drives the spine straight back out through the
+    # street it just entered from, and every core lands off the site.
+    if edge_n.x * v_ax.x + edge_n.y * v_ax.y > 0:
+        v_ax = Point(-v_ax.x, -v_ax.y)
+
+    t = length * (0.2 + 0.6 * random.random())
+    # Stood off the frontage line. The entrance is ON the boundary by
+    # definition, and the entry run and core are placed before any
+    # containment test can reject them -- starting exactly on the line
+    # puts half the armature over it.
+    setback = CORRIDOR_WIDTH_CM
+    entrance = Point(a.x + edge_u.x * t + edge_n.x * setback,
+                     a.y + edge_u.y * t + edge_n.y * setback)
+
+    built = [k for k in program if not is_outdoor(k)]
+    outdoor_keys = [k for k in program if is_outdoor(k)] or ["Garden"]
+
+    # max_branch_cm is much larger than the branch strategy's 1200. That
+    # cap exists to stop an UNCONSTRAINED plan sprawling, and here the
+    # site already does the containing -- the two do different jobs, as
+    # growth.py's own docstring says. Left at 1200 the spine stacked to
+    # 13 storeys on a plot that comfortably holds the program across two
+    # or three, because it hit the cap long before it hit the boundary.
+    plan = generate_floorplan(built, seed=seed, boundary=ctx.boundary,
+                              entrance=entrance, axes=(u_ax, v_ax),
+                              max_branch_cm=max_branch_cm)
+
+    # Residual -> green. Appending is safe: outdoor elements build no
+    # walls, so the resolved wall set and every existing element's
+    # wall_ids stay valid. Growth steps are reassigned because the new
+    # elements would otherwise all claim step 0.
+    occupied: dict[int, list] = {}
+    for el in plan.elements:
+        for lv in range(el.level, el.level + el.floors):
+            occupied.setdefault(lv, []).append(el.corners)
+    _fill_residual(plan.elements, occupied, ctx, outdoor_keys,
+                   plan.unit_counts, resolution_cm)
+    _assign_growth_steps(plan.elements)
+    plan.off_site = [f"{el.label} (L{el.level})" for el in plan.elements
+                     if not polygon_contains(el.corners, ctx.boundary)]
+    return plan
 
 
 def _fill_residual(elements, occupied, ctx: SiteContext, keys, counts,
