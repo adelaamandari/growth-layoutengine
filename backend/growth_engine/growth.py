@@ -54,6 +54,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import random
 
+from .components import BAY_CM
 from .geometry import Point, polygon_contains, polygons_overlap
 from .catalog import UnitType, get_unit
 from .shared_spaces import SharedSpace, get_shared, is_outdoor
@@ -273,6 +274,50 @@ def _add_corridor(elements, occupied, seg_start: Point, seg_end: Point,
     corners = _rect(c1, c2, c3, c4)
     elements.append(PlacedElement("corridor", "Corridor", corners, level=level))
     _reserve(occupied, level, 1, corners)
+
+
+# The structural grid frame.py stands its columns on, named here because
+# this module owns the two things that anchor it: the entrance, which is
+# its origin, and the plan's axes. frame.py takes GRID_CM from the same
+# BAY_CM, so there is one number and not two that must agree.
+STRUCTURAL_GRID_CM = BAY_CM
+
+# Slide each distributed stair along its run to meet the grid.
+#
+# OFF, on measurement. It was worth trying -- a stair is the one room
+# whose floor really must be held up -- but at the shipped 6-bay entry
+# run it makes the structure WORSE, not better: the worst unsupported
+# span goes 2.46m -> 6.31m and one element crosses the one-bay limit
+# that nothing crosses without it. Sliding forward to meet a grid line
+# along the run can push a core to a position no better in the
+# perpendicular axis, which is the one the corridor fixes, and it
+# displaces everything the run places after it.
+#
+# Kept rather than deleted because the reasoning is sound and a future
+# change to how runs are filled could make it pay. Flip it and re-run
+# frame.support_report and diagnostics.access_report before believing
+# it helps.
+#
+#             max->core avg   worst   unsupported   over 1 bay   worst gap
+#   off            18.2 m    26.9 m       14.2          0          2.46 m
+#   on             18.6 m    23.4 m       10.2          1          6.31 m
+SNAP_CORES_TO_GRID = False
+
+
+def grid_offset_cm(p: Point, origin: Point, axes, pitch: float = STRUCTURAL_GRID_CM) -> float:
+    """How far `p` is from the nearest node of the structural grid.
+
+    A column exists only where a grid node falls inside a footprint, so
+    this is the difference between a room the frame can hold up and one
+    whose floor draws in mid-air. Measured in the plan's own frame, not
+    the world's -- the grid turns with the building.
+    """
+    u, v = axes
+    du = (p.x - origin.x) * u.x + (p.y - origin.y) * u.y
+    dv = (p.x - origin.x) * v.x + (p.y - origin.y) * v.y
+    eu = du - round(du / pitch) * pitch
+    ev = dv - round(dv / pitch) * pitch
+    return (eu * eu + ev * ev) ** 0.5
 
 
 def _add_core(elements, occupied, core_pos: Point, level: int = 0, axes=None):
@@ -687,6 +732,43 @@ def generate_floorplan(program: list[str], seed: int | None = None,
                     rkey = (id(br_c), side_c)
                     if br_c[okey] - last_core.get(rkey, 0.0) < core_pitch_cm:
                         continue
+                    # Slide the stair ALONG its run to wherever it comes
+                    # closest to a grid node, before committing to the
+                    # offset the pitch counter happened to land on. A
+                    # 170cm core between grid lines carries no column and
+                    # its floor draws unsupported; a core is the one room
+                    # that must not, because it is the stair.
+                    #
+                    # Along the run only -- the perpendicular position is
+                    # the corridor's and moving off it would leave a
+                    # stair you cannot reach. That means this REDUCES the
+                    # gap rather than always closing it: the corridor
+                    # centreline may simply not pass near a node, and
+                    # frame.support_report says so when it does not.
+                    # FORWARD only. This offset is the run's fill cursor,
+                    # not a free coordinate: everything behind it is
+                    # already built. Searching backwards as well looked
+                    # harmless and cost 4 of 8 test seeds their stair
+                    # spacing -- the rewound core collided with what was
+                    # already there, failed _is_free, and simply was not
+                    # placed, so the worst walk went 20.7m -> 41.2m. It
+                    # also left near-miss slivers that broke the wall
+                    # invariant on seed 11. One pitch forward reaches
+                    # every alignment anyway, because nodes repeat.
+                    base_off = br_c[okey]
+                    best_off, best_gap = base_off, None
+                    step = STRUCTURAL_GRID_CM / 12.0
+                    k = 0
+                    while SNAP_CORES_TO_GRID and k * step <= STRUCTURAL_GRID_CM:
+                        for cand_off in (base_off + k * step,):
+                            m0 = br_c["start"] + br_c["dir"].scaled(cand_off + CORE_HALF)
+                            centre = m0 + br_c["pd"].scaled(
+                                side_c * (CORRIDOR_HALF + CORE_HALF))
+                            g = grid_offset_cm(centre, entrance, (u_ax, v_ax))
+                            if best_gap is None or g < best_gap:
+                                best_off, best_gap = cand_off, g
+                        k += 1
+                    br_c[okey] = best_off
                     a0 = br_c["start"] + br_c["dir"].scaled(br_c[okey])
                     a1 = br_c["start"] + br_c["dir"].scaled(br_c[okey] + CORE_SIZE_CM)
                     e0 = a0 + br_c["pd"].scaled(side_c * CORRIDOR_HALF)

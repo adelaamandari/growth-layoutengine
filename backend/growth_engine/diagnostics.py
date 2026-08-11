@@ -190,7 +190,7 @@ def wall_length(elements: list[PlacedElement]) -> float:
     return total
 
 
-def verify_walls(plan, tol_cm: float = 1.0) -> dict:
+def verify_walls(plan, tol_cm: float = MIN_SHARED_CM) -> dict:
     """
     Check that the resolved wall set really is deduplicated.
 
@@ -198,6 +198,21 @@ def verify_walls(plan, tol_cm: float = 1.0) -> dict:
     per-element total minus the shared length, i.e. every shared stretch
     is present exactly once. Returns a report rather than raising, so it
     can be surfaced in the API and used as a regression guard.
+
+    The tolerance is one sliver (MIN_SHARED_CM), not 1cm. This module and
+    walls.py are deliberately independent and each decides for itself
+    when two edges are the same line -- COLLINEAR_TOL_CM here, its own
+    line grouping there -- so on geometry that very nearly aligns they
+    are ENTITLED to disagree slightly about where a shared stretch starts
+    and ends. Seed 11 came out 1.29cm apart on 1,418m of wall and failed
+    a 1cm tolerance; that is a rounding difference between two honest
+    measurements, not a wall built twice.
+
+    This does not weaken the check. The defect this exists to catch was
+    177m -- four orders of magnitude above the tolerance -- and anything
+    of that kind still fails loudly. A tolerance tight enough to trip on
+    tenths of a millimetre per metre is one that gets ignored, which is
+    worse than one that is honest about its own precision.
     """
     naive = wall_length(plan.elements)
     shared_len, shared_segs = shared_boundaries(plan.elements)

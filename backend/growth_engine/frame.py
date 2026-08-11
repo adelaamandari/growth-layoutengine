@@ -788,6 +788,72 @@ def build_frame(plan: FloorPlan, joint_blocks: bool = False,
                     ))
                     cursor += part
 
+    # --- transfer beams to unsupported plates: step 4r + 1 -----------
+    # A deck is emitted for every element that builds walls, and a column
+    # exists only where a grid node falls INSIDE a footprint. A 170cm
+    # corridor or core can fall entirely between grid lines, and its
+    # plate then draws in mid-air with nothing reaching it -- which is
+    # what Adela saw in the Frame view.
+    #
+    # The plate is not wrong to be there: a 1.7m corridor genuinely does
+    # not want its own column, and in a real building its floor spans off
+    # the structure either side. What was missing is that span. So where
+    # an element holds no node, beam from its nearest edge to the nearest
+    # columns that can reach it, in catalog parts like every other beam.
+    #
+    # Two columns, not one, because a single strut is a prop and two make
+    # a span. Capped at one bay: past that the grid genuinely cannot
+    # reach and drawing a 6m stick would assert a structure that is not
+    # there. frame.support_report reports what is left over rather than
+    # this quietly covering for it.
+    for el in plan.elements:
+        if not builds_walls(el):
+            continue
+        poly = list(el.corners)
+        npo = len(poly)
+        if any(point_in_polygon(Point(nd.x, nd.y), poly) for nd in nodes):
+            continue                      # holds its own column
+
+        z0e = getattr(el, "z0", 0.0)
+        reach = []
+        for nd in nodes:
+            d = min(_seg_distance(Point(nd.x, nd.y), poly[i], poly[(i + 1) % npo])
+                    for i in range(npo))
+            if d <= GRID_CM:
+                reach.append((d, nd))
+        reach.sort(key=lambda r: r[0])
+        if not reach:
+            continue                      # nothing close enough to span to
+
+        cxe = sum(c.x for c in poly) / npo
+        cye = sum(c.y for c in poly) / npo
+        for _d, nd in reach[:2]:
+            # From the column to the element's centre, stopping at the
+            # edge -- the beam lands ON the plate it carries, and running
+            # it to the centroid would drive it through the floor.
+            vx, vy = cxe - nd.x, cye - nd.y
+            span = hypot(vx, vy)
+            if span < GRID_TOL_CM:
+                continue
+            ux_, uy_ = vx / span, vy / span
+            ang = atan2(uy_, ux_)
+            for storey in _spanned_storeys(z0e, z0e + el.height_cm):
+                z = storey * STOREY_CM
+                if storey not in nd.levels:
+                    continue              # the column is not there yet
+                cursor = 0.0
+                for name, part in _partial_bay(min(span, GRID_CM)):
+                    spec = CATALOG.get(name, CATALOG["SB"])
+                    mid = cursor + part / 2
+                    members.append(FrameMember(
+                        kind="beam", component=name,
+                        cx=nd.x + ux_ * mid, cy=nd.y + uy_ * mid, cz=z,
+                        sx=part, sy=spec["width_cm"], sz=spec["thickness_cm"],
+                        angle=ang, node_id=nd.id, grow_sign=1,
+                        growth_step=_step(nd.depth, z, PHASE_BEAM),
+                    ))
+                    cursor += part
+
     # --- floor deck: step 4r + 2 -------------------------------------
     # One plate per element footprint per STOREY THE ELEMENT SPANS,
     # sitting on each slab line it crosses. Per element rather than per
@@ -1000,6 +1066,62 @@ def build_frame(plan: FloorPlan, joint_blocks: bool = False,
                  joint_overlaps=joint_overlaps,
                  course_cm=STOREY_CM / per_storey,
                  grid_cm=GRID_CM, span_count=spans)
+
+
+def support_report(plan, frame: Frame, limit_cm: float = GRID_CM) -> dict:
+    """How far each floor plate sits from the nearest column.
+
+    A deck is emitted for every element that builds walls, with no test
+    that anything holds it up -- and a column only exists where a node of
+    the 360cm grid falls INSIDE a footprint. Corridors and cores are
+    170cm wide, under half a bay, so a short one can fall entirely
+    between grid lines and its plate then draws in mid-air. Adela spotted
+    exactly that in the Frame view.
+
+    This is reported rather than prevented, for the same reason
+    `unclad_cm` and `off_site` are. Most of it is not a fault: a plate
+    reaching a metre off the structure either side is ordinary building,
+    and a 170cm corridor does not want its own column. The number that
+    matters is the WORST gap, because that is a real clear span, and at
+    5m it is asking a floor to do something a floor cannot.
+
+    Measured from the element's OUTLINE, not its centre -- the centre of
+    a long corridor is far from everything and says nothing about whether
+    the ends are held.
+    """
+    if not frame.nodes:
+        return {"elements": 0, "unsupported": 0, "worst_gap_m": 0.0,
+                "limit_m": limit_cm / 100, "within_limit": True, "offenders": []}
+
+    rows = []
+    for el in plan.elements:
+        if not builds_walls(el):
+            continue
+        poly = list(el.corners)
+        n = len(poly)
+        gap = min(
+            0.0 if point_in_polygon(Point(nd.x, nd.y), poly)
+            else min(_seg_distance(Point(nd.x, nd.y), poly[i], poly[(i + 1) % n])
+                     for i in range(n))
+            for nd in frame.nodes)
+        rows.append((gap, el))
+
+    over = [(g, el) for g, el in rows if g > limit_cm]
+    over.sort(key=lambda r: -r[0])
+    worst = max((g for g, _el in rows), default=0.0)
+    return {
+        "elements": len(rows),
+        # Holding no column of their own. Not a fault by itself.
+        "unsupported": sum(1 for g, _el in rows if g > 0.0),
+        # Further from a column than one bay, i.e. asking for a clear
+        # span longer than the grid was designed to make.
+        "over_limit": len(over),
+        "worst_gap_m": round(worst / 100, 2),
+        "limit_m": limit_cm / 100,
+        "within_limit": not over,
+        "offenders": [{"label": el.label, "level": el.level, "kind": el.kind,
+                       "gap_m": round(g / 100, 2)} for g, el in over[:10]],
+    }
 
 
 def frame_summary(frame: Frame) -> dict:

@@ -56,6 +56,7 @@ from .geometry import (
     Point, point_in_polygon, polygon_area, polygon_contains, polygons_overlap,
 )
 from .growth import (
+    STRUCTURAL_GRID_CM,
     CORRIDOR_WIDTH_CM,
     ENTRY_CORRIDOR_BAYS_CM,
     generate_floorplan,
@@ -997,12 +998,34 @@ GREEN_TARGET = (0.30, 0.40)
 # armature, not serving the door.
 #
 # 16m is where that stops paying. Swept at 3.4/8/12/16/20/26/32.9m over
-# 8 seeds, it gives more building (1139 vs 1055m2) and a shorter worst
-# walk to a stair (26.9 vs 29.8m) than the value it replaces, for half
-# the corridor. Measured, not derived: the response is noisy enough that
-# 18m tests worse than both its neighbours, so read this as the middle
-# of a broad flat optimum rather than a sharp one.
-ENTRY_INSET_CM = 1600.0
+# 8 seeds, it gives more building than the value it replaces and a
+# shorter worst walk to a stair, for half the corridor. Measured, not
+# derived: the response is noisy enough that 18m tests worse than both
+# its neighbours, so read it as the middle of a broad flat optimum
+# rather than a sharp one.
+#
+# Set to SIX WHOLE BAYS (21.6m) rather than 16m, which buys something
+# exact. frame.py anchors the structural
+# grid on the entrance and runs the entry corridor down -v, so the main
+# core lands at node (0, -entry_run/360) -- a whole number of bays puts
+# it exactly ON a node and guarantees the building's principal stair a
+# column. At 16m it fell 1.6m short of one and its floor drew
+# unsupported, along with a Lobby 5m from anything.
+#
+# Six bays rather than four or five, over 8 seeds with cores unsnapped:
+#
+#     entry   bays   max->core avg / worst   over 1 bay   worst gap   green
+#     14.4m   4.00        22.7 / 34.4            0         2.69 m      5/8
+#     16.0m   4.44        18.2 / 21.4            2         5.00 m      6/8
+#     18.0m   5.00        19.9 / 30.0            0         3.35 m      2/8
+#     21.6m   6.00        18.2 / 26.9            0         2.46 m      7/8
+#
+# The honest cost, stated because access_report will show it: the WORST
+# walk to a stair goes 21.4m -> 26.9m against Adela's 20m target. What
+# it buys is no unsupported element anywhere and the best green of the
+# four. 16m keeps the shortest walk and is the value to go back to if
+# the walk matters more than the floating plate.
+ENTRY_INSET_CM = 6 * STRUCTURAL_GRID_CM
 
 
 def generate_spine_floorplan(program, site, seed=None, inset_m: float = 6.0,

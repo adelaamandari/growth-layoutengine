@@ -216,6 +216,9 @@ class FrameResponse(BaseModel):
     growth_steps: int
     step_labels: list[str]
     summary: dict
+    # How far each floor plate is from the nearest column, reported on
+    # every response the way /api/plan reports wall_check.
+    support: dict = {}
 
 
 class FacadeMemberOut(BaseModel):

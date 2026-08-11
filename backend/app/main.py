@@ -31,7 +31,9 @@ from growth_engine import (
 )
 from growth_engine.growth import CORE_SIZE_CM, CORRIDOR_WIDTH_CM
 from growth_engine.shared_spaces import INDOOR_KEYS, OUTDOOR_KEYS, SHARED_CATALOG
-from growth_engine.frame import STOREY_CM, build_frame, frame_summary
+from growth_engine.frame import (
+    STOREY_CM, build_frame, frame_summary, support_report,
+)
 from growth_engine.facade import (
     PANEL_ROLES, build_facade, column_alignment, facade_summary, verify_facade,
 )
@@ -387,6 +389,7 @@ def frame(req: PlanRequest) -> FrameResponse:
         growth_steps=fr.growth_steps,
         step_labels=fr.step_labels,
         summary=frame_summary(fr),
+        support=support_report(fp, fr),
     )
 
 

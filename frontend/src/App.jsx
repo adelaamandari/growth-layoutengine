@@ -678,6 +678,26 @@ export default function App() {
                   40×40 column and 60×60 plate fit at every node.
                 </p>
               )}
+
+              {/* A column exists only where a grid node lands inside a
+                  footprint, so a 170 cm corridor can fall between grid
+                  lines and hold none. Reported, not hidden: most of it is
+                  ordinary building, and the number that matters is the
+                  worst clear span. */}
+              {shownFrame.support?.elements > 0 && (
+                <p
+                  className={shownFrame.support.within_limit ? "note" : "note warnbar"}
+                  style={{ marginTop: 10 }}
+                >
+                  <b>{shownFrame.support.unsupported}</b> of {shownFrame.support.elements} rooms
+                  hold no column of their own; their floor spans off the structure
+                  either side, braced by transfer beams. Worst clear span{" "}
+                  <b>{shownFrame.support.worst_gap_m} m</b>
+                  {shownFrame.support.within_limit
+                    ? `, all inside the ${shownFrame.support.limit_m} m bay.`
+                    : ` — ${shownFrame.support.over_limit} beyond the ${shownFrame.support.limit_m} m bay, which is further than the grid can reach.`}
+                </p>
+              )}
             </div>
           )}
 
