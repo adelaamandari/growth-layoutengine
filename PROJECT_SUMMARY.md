@@ -83,7 +83,7 @@ Adela's renders.
   > `PlacedElement.wall_ids` references them.
   >
   > On the default program **at seed 42** this takes 690.6m of drawn wall down
-  > to **533.8m across 94 walls, 29 of them shared — 1,601.5 m²**. A
+  > to **533.8m across 95 walls, 28 of them shared — 1,601.5 m²**. A
   > consequence worth confirming against the drawings: cutting a corridor edge
   > where units meet it puts an **N node at each junction**, so a long corridor
   > wall is now several spans rather than one continuous mirrored sequence.

@@ -33,7 +33,7 @@ i.e. every shared stretch is present exactly once. It returns a report
 rather than raising, so the API can surface it (`/api/plan` does, on
 every response) and it can act as a regression guard. On the default
 program at SEED 42 it holds to 0.00m: 690.55m naive, 156.73m shared,
-533.83m resolved -- 1,601.5 m2 of wall.
+533.83m resolved across 95 walls, 28 of them shared -- 1,601.5 m2.
 
 The seed matters and belongs in the figure. Shared spaces draw their
 size from a range, so an unseeded plan gives a different total every
