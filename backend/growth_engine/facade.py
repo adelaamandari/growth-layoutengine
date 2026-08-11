@@ -391,10 +391,27 @@ def build_facade(plan: FloorPlan, pitch_cm: float | None = None,
             base = lo + ((hi - lo) - n_line * step) / 2
 
         # Per storey, which stretches of this line actually exist.
+        #
+        # EVERY storey an owner occupies, not just the one it is based
+        # on. A duplex is one element with floors=2, and growth.py groups
+        # walls by el.level alone, so its upper storey has no wall of its
+        # own -- clad from the wall set as-is, a 3Bed's second floor came
+        # out bare. On a four-storey plan that left 90 panels on level 0,
+        # 66 on level 1, 7 on level 2 and none on level 3: a facade that
+        # stopped two floors below the highest room.
+        #
+        # A wall is claddable on a storey if ANY of its owners is there.
+        # Shared walls have several owners and they need not be the same
+        # height -- a duplex against a single-storey corridor is clad for
+        # both its floors, which is what you would build.
         by_level: dict[int, list] = {}
         for t0, t1, wall in items:
-            by_level.setdefault(plan.elements[wall.owners[0]].level, []).append(
-                (t0, t1, wall))
+            for owner in wall.owners:
+                oel = plan.elements[owner]
+                for lv in range(oel.level, oel.level + oel.floors):
+                    bucket = by_level.setdefault(lv, [])
+                    if not any(w is wall for _a, _b, w in bucket):
+                        bucket.append((t0, t1, wall))
 
         for level in sorted(by_level):
             here = by_level[level]
@@ -423,7 +440,14 @@ def build_facade(plan: FloorPlan, pitch_cm: float | None = None,
                 if hit is None:
                     hit = min(here, key=lambda it: min(abs(t - it[0]), abs(t - it[1])))
                 wall = hit[2]
-                el = plan.elements[wall.owners[0]]
+                # The owner standing on THIS storey. Picking owners[0]
+                # blindly would take the level from whichever element the
+                # wall happened to list first, which on a shared wall is
+                # not necessarily one that reaches this high.
+                el = next((plan.elements[o] for o in wall.owners
+                           if plan.elements[o].level <= level
+                           < plan.elements[o].level + plan.elements[o].floors),
+                          plan.elements[wall.owners[0]])
 
                 normal = _outward(wall, el)
                 # Rotation about +z that carries the panel's local axes
@@ -438,15 +462,15 @@ def build_facade(plan: FloorPlan, pitch_cm: float | None = None,
                 # most camera angles that still looks like a facade.
                 angle = atan2(normal.x, -normal.y)
 
-                panel, rule = _choose(el.kind, el.level, rank_of.get(wall.id, 0),
+                panel, rule = _choose(el.kind, level, rank_of.get(wall.id, 0),
                                       n_line, k)
                 out.panels.append(FacadePanel(
                     panel=panel,
                     cx=ln["ox"] + ln["ux"] * t,
                     cy=ln["oy"] + ln["uy"] * t,
-                    z0=el.level * LEVEL_HEIGHT_CM,
+                    z0=level * LEVEL_HEIGHT_CM,
                     angle=angle,
-                    level=el.level,
+                    level=level,
                     wall_id=wall.id,
                     owner=el.label,
                     rule=rule,

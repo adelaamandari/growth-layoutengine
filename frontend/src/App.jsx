@@ -93,7 +93,7 @@ export default function App() {
   const [courseCm, setCourseCm] = useState(300);
   const [perRoom, setPerRoom] = useState(true);
   const [animateGrowth, setAnimateGrowth] = useState(true);
-  const [jointBlocks, setJointBlocks] = useState(false);
+  const [jointBlocks, setJointBlocks] = useState(true);
   // Ceilings read as the dominant surface from above, so they are worth
   // being able to drop. A view filter, not a rebuild -- the engine has
   // already sent them, and refetching to hide a member kind would throw
