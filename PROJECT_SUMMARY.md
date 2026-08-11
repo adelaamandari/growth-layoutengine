@@ -82,11 +82,20 @@ Adela's renders.
   > owned by whichever elements cover it. `FloorPlan.walls` holds them,
   > `PlacedElement.wall_ids` references them.
   >
-  > On the default program this took 550.3m of drawn wall down to **379.0m
-  > across 59 walls, 28 of them shared**. A consequence worth confirming
-  > against the drawings: cutting a corridor edge where units meet it puts an
-  > **N node at each junction**, so a long corridor wall is now several spans
-  > rather than one continuous mirrored sequence.
+  > On the default program **at seed 42** this takes 690.6m of drawn wall down
+  > to **533.8m across 94 walls, 29 of them shared — 1,601.5 m²**. A
+  > consequence worth confirming against the drawings: cutting a corridor edge
+  > where units meet it puts an **N node at each junction**, so a long corridor
+  > wall is now several spans rather than one continuous mirrored sequence.
+  >
+  > The seed belongs in that figure. Shared spaces draw their size from a
+  > range, so an unseeded plan totals differently every run — the numbers this
+  > file used to quote (550.3 → 379.0 across 59 walls) came from one such run
+  > and never reproduced. What holds on *any* run is `delta_m == 0.00`.
+  >
+  > **Updated 2026-08-11**: the resolved total is also genuinely higher than
+  > those old figures, because walls now resolve per occupied storey — see
+  > below.
 
 Draft reference file: `MANUAL - COMPONENT GEOMETRY RULESET.py` (delivered
 earlier, has open questions worth resolving against her actual joinery
@@ -132,10 +141,25 @@ That file is *not* in this repo.
     storey (`MAX_EMPTY_LEVELS`) rather than giving up. Without either, a
     program of four duplexes placed four units and abandoned the other
     fourteen.
-  - **Walls resolve per level.** A level-1 corridor stands directly above the
-    level-0 one and `resolve_walls` works in plan, so resolving them together
-    would merge two real walls into one and halve the take-off. Same reason
-    `diagnostics.shared_boundaries` only compares elements on one level.
+  - **Walls resolve per OCCUPIED storey.** A level-1 corridor stands directly
+    above the level-0 one and `resolve_walls` works in plan, so resolving them
+    together would merge two real walls into one and halve the take-off.
+
+    > **Corrected 2026-08-11.** This used to group by the element's own
+    > `el.level`, and `diagnostics.shared_boundaries` guarded with the matching
+    > `e1.level == e2.level`. That looks like the same rule and is not: a
+    > duplex is ONE element spanning levels 0–1, so it never met the ordinary
+    > unit standing on level 1 beside it. They share a plan line and each built
+    > its own copy — **177m of wall, built twice**, on the default plan.
+    >
+    > It verified clean because both modules made the same assumption.
+    > `diagnostics` exists precisely to be able to disagree with `walls.py`,
+    > and on this one thing it could not. An element now joins the group of
+    > every storey it occupies, `Wall` carries its own `level`, and
+    > `shared_boundaries` counts an overlap once per storey the pair *both*
+    > occupy. `verify_walls` also reports `resolved_area_m2` — length alone
+    > cannot tell a 300-tall wall from a 600-tall one of the same plan run,
+    > which is why this hid for so long.
   - Pass a very large `max_branch_cm` for the old single-storey behaviour.
 - **Overlap checking**: proper polygon collision via **Separating Axis
   Theorem (SAT)**, tolerant of flush-touching edges within a small epsilon
@@ -144,9 +168,11 @@ That file is *not* in this repo.
   collision, since a shared boundary line has zero separation. This was a
   real bug hit and fixed during development (rooms silently failed to place
   for a while because of it).
-- **No site boundary currently** — removed by request, growth is unconstrained
-  in extent. Reintroducing one is a `point_in_polygon` check already present
-  in `geometry.py` but not currently wired into `growth.py`.
+- ~~**No site boundary currently**~~ — **superseded.** Growth is constrained to
+  a real plot (Deptford Church St, SE8) via `site/location.py`; `generate_
+  floorplan(..., boundary=…)` rejects any placement `polygon_contains` fails,
+  and `plan.off_site` audits the result. On by default through `/api/plan`'s
+  `constrain_to_site`. The site outline draws in all four 3D views.
 - **Adjacency matrix**: only `SL-SK = 2.0` (SL preferentially follows an SK)
   is currently wired in as a real rule. The rest of `ADJACENCY_MATRIX.py`
   (GR/G avoiding residential, MH near entrance, ER-GA, etc.) is NOT yet
@@ -554,10 +580,12 @@ converts (to metres), because that is what Blender and Rhino expect.
 - **Adjacency matrix** is barely wired in (one rule: `SL-SK=2.0`). The rest
   of `ADJACENCY_MATRIX.py` needs real implementation, not just a proof of
   concept. (`ADJACENCY_MATRIX.py` is not in this repo either.)
-- **No site boundary** — growth is currently unconstrained. `point_in_polygon`
-  exists in `geometry.py` but isn't called from `growth.py`. Note that
-  `site/analysis.py` already produces the daylight/circulation bias field
-  this would need; only the wiring is missing.
+- ~~**No site boundary**~~ — **solved.** Growth is constrained to the Deptford
+  plot and audited by `plan.off_site`; see the correction above. What remains
+  open is weaker and worth stating separately: the engine *respects* the
+  boundary but does not *seek* placements that use the plot well, and
+  `site/analysis.py`'s daylight/circulation bias field is still not wired into
+  where things go.
 - **Overlap resolution is blunt**: when a communal room doesn't fit, it
   shrinks proportionally (×0.68 per retry, up to 7 attempts) rather than
   trying alternate positions first. Works, but not elegant. *Correction to
@@ -685,12 +713,49 @@ converts (to metres), because that is what Blender and Rhino expect.
   to stop, and 15 of 28 capitals sat closer to a neighbour than the 240cm
   assembly is wide. On the 360 grid the closest two nodes can be is 360, so
   the capital clears with 120 to spare and `joint_overlaps` is **0**. The
-  capital now goes on every column, and `joint_blocks` stays off by default
-  only because the bare column reads more clearly while judging a plan.
+  capital now goes on every column. **`joint_blocks` defaults ON since
+  2026-08-11** — `joint_overlaps` is 0 on the default plan, so there is
+  nothing to hide behind the simpler view; it costs 17,700 → 43,428 members
+  to draw.
 
 - ~~**Shared walls were built twice.**~~ Resolved 2026-07-31 in `walls.py`;
   see the mirror-pair section above. Guarded by `diagnostics.verify_walls()`,
   checked over 400 random programs with zero invariant failures.
+
+- ~~**Shared walls were built twice — again, one storey up.**~~ Resolved
+  2026-08-11. The 2026-07-31 fix held in plan but not in section: walls were
+  grouped by `el.level`, so a duplex spanning levels 0–1 never met the unit
+  standing on level 1 beside it, and each built its own copy of the line they
+  share. **177m, built twice.** `verify_walls` called it clean because
+  `shared_boundaries` skipped the same pairs by the same test — two modules
+  that are supposed to be independent, sharing the one assumption that was
+  wrong. Now resolved per *occupied* storey on both sides, `Wall` carries its
+  own `level`, and the report adds `resolved_area_m2`. Verified delta 0.000
+  and zero doubly-built wall across 5 program shapes × 3 seeds and 6 site
+  seeds. Deptford spine seed 42: 1,212 → **1,434m / 4,302 m²**.
+
+- ~~**The facade stopped two storeys below the highest room.**~~ Resolved
+  2026-08-11, and it was the same bug seen from the other end: the facade is
+  built from the wall set, and duplex upper storeys had no walls to clad. Seed
+  42 went from 90/66/7 panels on levels 0–2 to **88/75/25/6 on levels 0–3**
+  against a highest room on level 3.
+
+- ~~**33m of corridor before the building started.**~~ Resolved 2026-08-11.
+  The spine strategy set `entry_run_cm = length * 0.3` — a third of the
+  109.8m spine edge — and nothing ever hung off it, because the three arms
+  start at the core. It could not simply be deleted: the arms leave along −v,
+  −u and +u with none pointing back at the street, so the core's position *is*
+  the building's street edge, and a two-bay run crowded the plan onto one end
+  of the plot (ground 1107 → 831 m², green 81%). Swept and set to **16m**:
+  more building and a shorter worst walk to a stair than the value it
+  replaced, for half the corridor.
+
+- ~~**The green target was reported, not met.**~~ `generate_spine_floorplan`
+  now closes a loop on it — grow, measure, steer `courtyard_ratio`, keep the
+  best of 4. When the reserve hits its floor and green is still over, the miss
+  is structural (ground the building never reached, not courtyard), so it
+  perturbs the *layout* seed deterministically instead of pulling a spent
+  lever. In the 30–40% band on 6 of 10 seeds, from 1 of 6.
 - ~~**No file export.**~~ OBJ, SVG and JSON export all exist now
   (`export.py`, `preview.py`, and `/api/export/*`). Note this landed *before*
   the growth logic was fully settled, contrary to the original sequencing —
