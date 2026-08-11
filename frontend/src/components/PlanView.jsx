@@ -10,21 +10,63 @@ const COMPONENT_VAR = { SA: "var(--sa)", SB: "var(--sb)", SC: "var(--sc)" };
 const fmt = (v, d = 1) =>
   v.toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
 
-export default function PlanView({ plan, layers }) {
+// How many storeys an element occupies. A duplex is 600cm and so shows
+// on two plans: solid on the level it is entered from, ghosted on the
+// one above, the way a maisonette's upper part is drawn.
+const floorsOf = (el) => Math.max(1, Math.round((el.height_cm ?? 300) / 300));
+
+// One hue per grid family, matching the colours in Adela's grid
+// extraction sketch: the orthogonal street grid warm, the diagonal
+// Crossfield grid violet, so the two systems are told apart at a glance.
+const FAMILY_STROKE = ["#eb6834", "#8a6fd6", "#2a78d6"];
+
+export default function PlanView({ plan, layers, level = 0, site = null, grid = null }) {
   const svgRef = useRef(null);
   const wrapRef = useRef(null);
   const [tip, setTip] = useState(null);
   const [view, setView] = useState(null);
   const drag = useRef(null);
 
+  // The plan now stacks, so one storey is drawn at a time. `above` is
+  // the upper half of duplexes reaching into this level; `below` is the
+  // storey underneath, kept faint for judging how the stack lines up.
+  const here = useMemo(
+    () => (plan?.elements ?? []).filter((el) => (el.level ?? 0) === level),
+    [plan, level]
+  );
+  const above = useMemo(
+    () => (plan?.elements ?? []).filter((el) => {
+      const l = el.level ?? 0;
+      return l < level && level < l + floorsOf(el);
+    }),
+    [plan, level]
+  );
+  const below = useMemo(
+    () => (plan?.elements ?? []).filter((el) => (el.level ?? 0) === level - 1),
+    [plan, level]
+  );
+  const wallsHere = useMemo(
+    () => (plan?.walls ?? []).filter((w) => (w.level ?? 0) === level),
+    [plan, level]
+  );
+
   // World bounds -> initial viewBox. SVG y grows downward, so every
   // y is negated on the way out and north stays up.
   const home = useMemo(() => {
     if (!plan) return null;
-    const [minX, minY, maxX, maxY] = plan.extent_cm;
+    let [minX, minY, maxX, maxY] = plan.extent_cm;
+    // Frame the SITE too when it is shown, or the building fills the
+    // view and the plot it stands on is off screen — which is the one
+    // thing drawing the boundary is meant to answer.
+    if (site && layers.site) {
+      for (const [x, y] of site.centreline_cm) {
+        minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+        minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+      }
+    }
     const pad = Math.max(maxX - minX, maxY - minY) * 0.04;
     return { x: minX - pad, y: -maxY - pad, w: maxX - minX + pad * 2, h: maxY - minY + pad * 2 };
-  }, [plan]);
+  }, [plan, site, layers.site]);
 
   useEffect(() => { if (home) setView({ ...home }); }, [home]);
 
@@ -32,8 +74,8 @@ export default function PlanView({ plan, layers }) {
   const zoom = view && home ? view.w / home.w : 1;
 
   const shared = useMemo(
-    () => (plan?.walls ?? []).filter((w) => w.shared && w.segments.length > 0),
-    [plan]
+    () => wallsHere.filter((w) => w.shared && w.segments.length > 0),
+    [wallsHere]
   );
 
   function onWheel(e) {
@@ -94,18 +136,102 @@ export default function PlanView({ plan, layers }) {
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
       >
-        {layers.fills && plan.elements.map((el, i) => (
+        {/* The site, under everything. Two outlines: the street
+            centrelines OSM actually gives, and the developable boundary
+            after the setback — the building has to sit inside the
+            second, not the first. */}
+        {layers.site && site && (
+          <g>
+            <polygon
+              points={site.centreline_cm.map((p) => `${p[0]},${-p[1]}`).join(" ")}
+              fill="var(--fill-outdoor)" fillOpacity="0.18"
+              stroke="var(--outdoor-line)" strokeWidth="1"
+              strokeOpacity="0.5" strokeDasharray="8 6"
+              vectorEffect="non-scaling-stroke"
+            >
+              <title>{site.address} — {site.area_m2} m² to street centrelines</title>
+            </polygon>
+            <polygon
+              points={site.boundary_cm.map((p) => `${p[0]},${-p[1]}`).join(" ")}
+              fill="none" stroke="var(--outdoor-line)" strokeWidth="2"
+              vectorEffect="non-scaling-stroke"
+            >
+              <title>Developable boundary at {site.inset_m} m setback — {site.developable_area_m2} m²</title>
+            </polygon>
+          </g>
+        )}
+
+        {/* The grid the SITE gives, not the one the engine brings: one
+            lattice per family, clipped to the plot, plus the cells on
+            the seam where one family hands over to the other. Drawn
+            above the site fill and below everything built. */}
+        {layers.grid && grid && (
+          <g>
+            {grid.families.map((f, fi) => (
+              <g key={`gf${fi}`} stroke={FAMILY_STROKE[fi % FAMILY_STROKE.length]}
+                 strokeOpacity="0.5">
+                {f.lines_cm.map((l, i) => (
+                  // vectorEffect is a per-shape presentation attribute and
+                  // does NOT inherit from the group. On the group it is
+                  // silently ignored, leaving strokeWidth at 1 USER unit —
+                  // one centimetre — which draws an invisible hairline.
+                  <line key={i} x1={l[0]} y1={-l[1]} x2={l[2]} y2={-l[3]}
+                        strokeWidth="1" vectorEffect="non-scaling-stroke" />
+                ))}
+              </g>
+            ))}
+            {/* The seam is the whole point of running two grids, and it
+                is where the awkward junction will have to be detailed —
+                so it is marked rather than left to be inferred. */}
+            {grid.cells.filter((c) => c.seam).map((c, i) => (
+              <circle key={`sm${i}`} cx={c.c[0]} cy={-c.c[1]}
+                      r={grid.resolution_cm * 0.16}
+                      fill="var(--warn)" fillOpacity="0.5" />
+            ))}
+          </g>
+        )}
+
+        {/* The storey below, faint -- drawn first so everything on this
+            level reads over it. */}
+        {layers.below && below.map((el, i) => (
           <polygon
-            key={`f${i}`}
+            key={`b${i}`}
             points={el.corners.map((c) => `${c[0]},${-c[1]}`).join(" ")}
-            fill={`var(--fill-${el.kind})`}
-            stroke="var(--rule)"
-            strokeWidth="1"
+            fill="none" stroke="var(--rule)" strokeWidth="1"
+            strokeOpacity="0.35" strokeDasharray="2 6"
             vectorEffect="non-scaling-stroke"
           />
         ))}
 
-        {layers.rooms && plan.elements.flatMap((el, i) =>
+        {/* An outdoor area builds no walls, so no SA/SB/SC strokes land
+            on its boundary. Its own outline is therefore the only edge
+            it gets, and it has to carry the weight those strokes carry
+            on a room — hence the heavier, green stroke. */}
+        {layers.fills && here.map((el, i) => (
+          <polygon
+            key={`f${i}`}
+            points={el.corners.map((c) => `${c[0]},${-c[1]}`).join(" ")}
+            fill={`var(--fill-${el.kind})`}
+            stroke={el.kind === "outdoor" ? "var(--outdoor-line)" : "var(--rule)"}
+            strokeWidth={el.kind === "outdoor" ? 2 : 1}
+            vectorEffect="non-scaling-stroke"
+          />
+        ))}
+
+        {/* Upper half of a duplex entered from the level below. */}
+        {layers.fills && above.map((el, i) => (
+          <polygon
+            key={`a${i}`}
+            points={el.corners.map((c) => `${c[0]},${-c[1]}`).join(" ")}
+            fill={`var(--fill-${el.kind})`} fillOpacity="0.4"
+            stroke="var(--rule)" strokeWidth="1" strokeDasharray="6 4"
+            vectorEffect="non-scaling-stroke"
+          >
+            <title>{el.label} — upper floor, entered from level {el.level}</title>
+          </polygon>
+        ))}
+
+        {layers.rooms && here.flatMap((el, i) =>
           el.rooms.map((r, j) => (
             <polygon
               key={`r${i}-${j}`}
@@ -136,7 +262,7 @@ export default function PlanView({ plan, layers }) {
 
         {/* Walls come from plan.walls, not per element -- a shared wall
             is stroked once here because it exists once. */}
-        {layers.walls && plan.walls.flatMap((w) =>
+        {layers.walls && wallsHere.flatMap((w) =>
           w.segments.filter((s) => s.c !== "N").map((s, j) => (
             <line
               key={`w${w.id}-${j}`}
@@ -147,7 +273,7 @@ export default function PlanView({ plan, layers }) {
           ))
         )}
 
-        {layers.nodes && plan.walls.flatMap((w) =>
+        {layers.nodes && wallsHere.flatMap((w) =>
           w.segments.filter((s) => s.c === "N").map((s, j) => (
             <circle
               key={`n${w.id}-${j}`}
@@ -159,20 +285,20 @@ export default function PlanView({ plan, layers }) {
           ))
         )}
 
-        {layers.labels && plan.elements.map((el, i) => {
+        {layers.labels && here.map((el, i) => {
           const cx = el.corners.reduce((s, c) => s + c[0], 0) / 4;
           const cy = el.corners.reduce((s, c) => s + c[1], 0) / 4;
           return (
             <text
               key={`t${i}`} x={cx} y={-cy} textAnchor="middle"
-              fontSize={92 * zoom} fontFamily="var(--mono)" fill="var(--ink)"
+              fontSize={92 * zoom} fontFamily="var(--sans)" fill="var(--ink)"
               paintOrder="stroke" stroke="var(--paper)" strokeWidth={3.5 * zoom}
             >{el.label}</text>
           );
         })}
 
         {/* hit layer last so it captures the pointer everywhere */}
-        {plan.elements.map((el, i) => (
+        {here.map((el, i) => (
           <polygon
             key={`h${i}`}
             points={el.corners.map((c) => `${c[0]},${-c[1]}`).join(" ")}
@@ -189,12 +315,23 @@ export default function PlanView({ plan, layers }) {
           <span className="k">kind</span> {tip.el.kind}<br />
           <span className="k">size</span> {fmt(tip.w / 100)} × {fmt(tip.d / 100)} m<br />
           <span className="k">area</span> {fmt((tip.w * tip.d) / 10000)} m²<br />
-          <span className="k">height</span> {fmt(tip.el.height_cm / 100)} m<br />
-          <span className="k">walls</span> {tip.el.wall_ids.length}
-          {(() => {
-            const sh = tip.el.wall_ids.filter((id) => plan.walls[id]?.shared).length;
-            return sh > 0 ? ` (${sh} shared)` : "";
-          })()}
+          {/* Height, storeys and a wall count are all statements about a
+              ROOM. On open ground they would read as zeros standing for
+              missing data rather than for the thing being ground. */}
+          {tip.el.kind === "outdoor" ? (
+            <>open ground — no walls, not floor area</>
+          ) : (
+            <>
+              <span className="k">height</span> {fmt(tip.el.height_cm / 100)} m
+              {floorsOf(tip.el) > 1 ? ` (${floorsOf(tip.el)} storeys)` : ""}<br />
+              <span className="k">level</span> {tip.el.level ?? 0}<br />
+              <span className="k">walls</span> {tip.el.wall_ids.length}
+              {(() => {
+                const sh = tip.el.wall_ids.filter((id) => plan.walls[id]?.shared).length;
+                return sh > 0 ? ` (${sh} shared)` : "";
+              })()}
+            </>
+          )}
           {tip.el.rooms.length > 0 && (
             <><br /><span className="k">rooms</span> {tip.el.rooms.map((r) => r.name).join(", ")}</>
           )}

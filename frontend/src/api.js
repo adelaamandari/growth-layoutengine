@@ -33,6 +33,44 @@ export async function getMassing(req) {
   return (await post("/api/massing", req)).json();
 }
 
+export async function getFrame(req) {
+  return (await post("/api/frame", req)).json();
+}
+
+// The real site: boundary in cm relative to the entrance, so it draws
+// straight over the plan. Static, so fetched once.
+export async function getSite() {
+  const res = await fetch("/api/site");
+  if (!res.ok) throw new Error("Could not load the site.");
+  return res.json();
+}
+
+// The grid read off the site's own edges, and the seam between the two
+// families. Static for a given resolution, so fetched once.
+export async function getSiteGrid() {
+  const res = await fetch("/api/site/grid");
+  if (!res.ok) throw new Error("Could not load the site grid.");
+  return res.json();
+}
+
+// The nine panel types and their member geometry. Static — fetched once
+// alongside the unit catalog, not on every regenerate, because it is
+// ~200KB that does not depend on the program.
+export async function getFacadeCatalog() {
+  const res = await fetch("/api/facade/catalog");
+  if (!res.ok) {
+    let detail = "Could not load the facade panel catalog.";
+    try { detail = (await res.json()).detail ?? detail; } catch { /* keep it */ }
+    throw new Error(detail);
+  }
+  return res.json();
+}
+
+// Which panel clads which bay. Instances only.
+export async function getFacade(req) {
+  return (await post("/api/facade", req)).json();
+}
+
 // Streams the file straight to the browser's downloader.
 export async function download(kind, req) {
   const res = await post(`/api/export/${kind}`, req);

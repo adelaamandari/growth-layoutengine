@@ -88,8 +88,9 @@ def polygons_overlap(a: Sequence[Point], b: Sequence[Point]) -> bool:
 
 
 def point_in_polygon(p: Point, poly: Sequence[Point]) -> bool:
-    """Standard ray-casting test. Kept for when a site boundary is
-    reintroduced -- not currently used by growth.py."""
+    """Standard ray-casting test. Used by site/analysis.py to score grid
+    cells, and by growth.py -- via polygon_contains -- to keep placement
+    inside the site boundary."""
     inside = False
     n = len(poly)
     for i in range(n):
@@ -101,3 +102,79 @@ def point_in_polygon(p: Point, poly: Sequence[Point]) -> bool:
             if p.x < x_intersect:
                 inside = not inside
     return inside
+
+
+def polygon_area(poly: Sequence[Point]) -> float:
+    """Plan area by the shoelace formula.
+
+    Bounding-box area was fine while every footprint was an axis-aligned
+    rectangle -- the box WAS the shape. The site strategy rotates
+    elements to follow the street they front, and a bounding box then
+    over-reports: a 10x4m unit at 58 degrees has a box about three times
+    its area, so a building would appear to GAIN floor area by turning.
+    """
+    s = 0.0
+    n = len(poly)
+    for i in range(n):
+        a, b = poly[i], poly[(i + 1) % n]
+        s += a.x * b.y - b.x * a.y
+    return abs(s) / 2
+
+
+def _orient(p: Point, q: Point, r: Point) -> int:
+    v = (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x)
+    if abs(v) < 1e-9:
+        return 0
+    return 1 if v > 0 else -1
+
+
+def segments_cross(a: Point, b: Point, c: Point, d: Point) -> bool:
+    """Do segments ab and cd cross PROPERLY, i.e. pass through each other
+    rather than merely touch?
+
+    Touching is deliberately not a crossing: a footprint whose edge lies
+    flush along the site boundary is on the site, the same way a wall
+    flush against a corridor is not a collision (see EPS above)."""
+    o1, o2 = _orient(a, b, c), _orient(a, b, d)
+    o3, o4 = _orient(c, d, a), _orient(c, d, b)
+    return o1 != o2 and o3 != o4 and 0 not in (o1, o2, o3, o4)
+
+
+def polygon_contains(inner: Sequence[Point], outer: Sequence[Point]) -> bool:
+    """Does `outer` wholly contain `inner`?
+
+    Both tests are needed and neither is sufficient alone:
+
+      every corner of `inner` is inside `outer` -- but for a NON-CONVEX
+        outer, all four corners of a rectangle can sit inside while the
+        rectangle bridges a concave notch;
+      no edge of `inner` properly crosses an edge of `outer` -- but that
+        passes trivially for an `inner` sitting entirely outside.
+
+    Together they are exact for any simple polygon, which matters because
+    a site boundary is not required to be a triangle.
+
+    Corners are pulled 1cm toward the centroid before testing. A
+    placement that lands exactly ON the boundary is legitimate, and
+    ray-casting is undefined there -- growth works on a 100cm probe grid,
+    so this is a case that really comes up rather than a theoretical one.
+    """
+    if not outer:
+        return True
+
+    cx = sum(p.x for p in inner) / len(inner)
+    cy = sum(p.y for p in inner) / len(inner)
+    for p in inner:
+        dx, dy = cx - p.x, cy - p.y
+        d = hypot(dx, dy)
+        probe = p if d <= EPS else Point(p.x + dx / d * EPS, p.y + dy / d * EPS)
+        if not point_in_polygon(probe, outer):
+            return False
+
+    n, m = len(inner), len(outer)
+    for i in range(n):
+        a, b = inner[i], inner[(i + 1) % n]
+        for j in range(m):
+            if segments_cross(a, b, outer[j], outer[(j + 1) % m]):
+                return False
+    return True

@@ -63,6 +63,11 @@ class Wall:
     end: Point
     owners: tuple[int, ...]              # indices into FloorPlan.elements
     segments: tuple[WallSegment, ...]    # the component walk, done once
+    # The storey this wall stands on. Walls resolve one storey at a time,
+    # so this is a property of the WALL, not something to be read back off
+    # an owner: a duplex owns walls on both the storeys it occupies, and
+    # asking owners[0] which level it is on cannot distinguish them.
+    level: int = 0
 
     @property
     def shared(self) -> bool:
@@ -183,7 +188,19 @@ def resolve_walls(elements) -> WallResolution:
             if hi - lo < MIN_WALL_CM:
                 # Real but unfabricable sliver -- account for it rather
                 # than letting it vanish from the length total.
-                dropped_cm += hi - lo
+                #
+                # Charged PER OWNER, not once. The invariant it feeds is
+                #     resolved + dropped == naive - shared
+                # and `naive` counts a stretch once for every element
+                # whose edge lies on it. A stretch below MIN_WALL_CM is
+                # also below diagnostics.MIN_SHARED_CM, so `shared`
+                # counts it ZERO times -- the two thresholds are the same
+                # number, which is what couples them. So a 2.5cm sliver
+                # between two elements contributes 5cm to naive, 0 to
+                # shared, and has to contribute 5cm here. Charging it
+                # once left the check short by exactly the sliver length,
+                # which is the -2.5cm delta seen on seeds 15 and 22.
+                dropped_cm += (hi - lo) * len(owners)
                 dropped_count += 1
                 continue
             p0, p1 = line.point_at(lo), line.point_at(hi)

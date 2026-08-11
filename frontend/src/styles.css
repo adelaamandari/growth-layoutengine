@@ -1,166 +1,419 @@
-/* Shared visual language with the SVG preview: recessive neutral fills,
-   saturated colour reserved for the wall components, mono for anything
-   numeric (drafting-annotation vernacular). Component hues are validated
-   for colour-vision deficiency across all pairs -- see preview.py. */
+/* LinX Growth Engine — styled to the LinX Massing Engine screen in
+   phase2/UI-STYLE-SPEC.md: Jost, the monochrome grey palette with the
+   #4f1717 maroon accent, and the spec's type scale (24 title / 13
+   section head / 12 toolbar / 11 data).
+
+   TWO PLACES DELIBERATELY DEPART FROM THE SPEC'S COLOUR TABLES, AND WHY
+
+   1. The spec defines no dark palette, so the dark block below comes
+      from a supplied reference instead (the Polyblock hero): true black,
+      achromatic greys, white text at full contrast, with the #4f1717
+      maroon lifted to #b04242 because the spec's value is invisible on
+      that ground. Everything else — type scale, weights, tracking, the
+      shape of the thing — is identical in both themes.
+
+      There is ONE dark block, not two, because <html data-theme> always
+      carries the RESOLVED theme: useTheme.js writes it, and the inline
+      script in index.html writes it again before first paint. Following
+      the OS is handled there rather than by a second copy of these
+      tokens under a prefers-color-scheme query.
+
+   2. The spec's semantic zone fills (residential #6e2424, private
+      communal #6a665f, …) are for a diagram where the FILL is the data.
+      Here the data is the wall components — SA/SB/SC are the subject of
+      the whole system and are invisible in any numeric output — so a
+      maroon unit fill would swamp the thing being drawn. Element fills
+      below are therefore tints in the spec's own hue families, and the
+      spec values that are already light are used exactly: #cfccc6 for
+      the corridor and #7d8a6a for the green areas. The component hues
+      themselves are untouched: they are validated all-pairs for
+      colour-vision deficiency (see preview.py) and are not a style
+      choice to be matched. */
 
 :root {
   color-scheme: light;
-  --plane: #eef0ee;
-  --paper: #fbfcfb;
-  --ink: #0b0b0b;
-  --ink-2: #52514e;
-  --ink-3: #898781;
-  --hair: #dfe2df;
-  --rule: #c3c2b7;
+
+  /* --- LinX Massing Engine palette, verbatim --- */
+  --bg-dark: #f1f3f5;      /* app background */
+  --bg-medium: #e4e7ea;    /* header, sidebar, inputs */
+  --bg-light: #ffffff;     /* cards, panels */
+  --border-dark: #b9bfc5;
+  --border-medium: #d3d8dd;
+  --border-light: #eaedf0;
+  --text-primary: #23282d;
+  --text-secondary: #5f676e;
+  --text-tertiary: #969da4;
+  --accent: #4f1717;
+  --accent-dark: #360f0f;
+
+  /* --- names this app already used, mapped onto the palette --- */
+  --plane: var(--bg-dark);
+  --paper: var(--bg-light);
+  --ink: var(--text-primary);
+  --ink-2: var(--text-secondary);
+  --ink-3: var(--text-tertiary);
+  --hair: var(--border-light);
+  --rule: var(--border-medium);
+
+  /* Wall components. NOT from the spec and not to be matched to it —
+     these three are validated for colour-vision deficiency across every
+     pair, in a drawing where any two may appear adjacent. */
   --sa: #2a78d6;
   --sb: #eb6834;
   --sc: #1baf7a;
-  --node-fill: #fbfcfb;
-  --node-line: #0b0b0b;
-  --dup: #d03b3b;
-  /* Shared walls are a resolved fact, not an error -- violet keeps them
-     clearly distinct from the SA/SB/SC component hues underneath. */
-  --shared: #4a3aa7;
-  --warn: #b06a00;
-  --fill-corridor: #e5e8e4;
-  --fill-core: #d2d6d0;
-  --fill-unit: #f6f8f6;
-  --fill-communal: #e9ece6;
-  --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --mono: ui-monospace, "Cascadia Code", "SF Mono", Menlo, Consolas, monospace;
+  --node-fill: #ffffff;
+  --node-line: #23282d;
+
+  --dup: #b86868;          /* spec's delete-button red */
+  --shared: #4f1717;       /* the maroon accent; shared walls are the
+                              app's own highlight, so they take it */
+  --warn: #8a5a1f;
+  --banner-ink: #7a2a2a;
+
+  /* The tooltip inverts against the page, so it cannot be built out of
+     --text-primary and a hardcoded white: in dark mode that is white on
+     white. It gets its own pair. */
+  --tip-bg: #23282d;
+  --tip-ink: #ffffff;
+  --outdoor-ink: #5d6a4d;  /* spec: "+ Green Areas" text */
+  --on-accent: #ffffff;
+
+  /* Element fills — tints of the spec's semantic zones. */
+  --fill-corridor: #cfccc6;   /* spec: corridor */
+  --fill-core: #bdbab5;       /* spec: default/fallback */
+  --fill-stairs: #cbc8c2;     /* a shade off the core, so the two read apart */
+  --fill-unit: #f3eeee;       /* residential #6e2424, tinted */
+  --fill-communal: #e7e5e0;   /* private communal #6a665f, tinted */
+  --fill-outdoor: #ccd6bd;    /* green areas #7d8a6a, tinted */
+  --outdoor-line: #7d8a6a;    /* spec: green / garden / playground */
+
+  --sans: 'Jost', 'Century Gothic', 'Avenir Next', sans-serif;
+  /* Jost carries the numerals too. This app used to set every figure in
+     a monospace face as a drafting-annotation gesture, which meant half
+     the interface was not in the brand face at all. Columns stay aligned
+     via font-variant-numeric: tabular-nums, applied where alignment
+     actually matters, rather than by making everything monospace.
+     --code is kept for the one thing that IS code: the shell command in
+     the frame panel. */
+  --code: source-code-pro, Menlo, Monaco, Consolas, 'Courier New', monospace;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root:where(:not([data-theme="light"])) {
-    color-scheme: dark;
-    --plane: #0d0d0d;
-    --paper: #1a1a19;
-    --ink: #ffffff;
-    --ink-2: #c3c2b7;
-    --ink-3: #898781;
-    --hair: #2c2c2a;
-    --rule: #383835;
-    --sa: #3987e5;
-    --sb: #d95926;
-    --sc: #199e70;
-    --node-fill: #1a1a19;
-    --node-line: #e8e8e2;
-    --dup: #e66767;
-    --shared: #9085e9;
-    --warn: #eda100;
-    --fill-corridor: #242624;
-    --fill-core: #33362f;
-    --fill-unit: #1f211f;
-    --fill-communal: #2a2d27;
-  }
+/* --- dark ----------------------------------------------------------
+   Toned to the Polyblock reference: TRUE black, ACHROMATIC, high
+   contrast. Three things follow from that reference and none of them
+   are the obvious default:
+
+     the ground is #000, not a dark grey. The surfaces above it climb in
+       small steps (#0a → #121212 → #171717) so the panels separate by
+       tone alone, with no drawn box needed.
+
+     every neutral is r=g=b. The earlier dark palette carried the light
+       palette's slight blue (#14171a), which is the ordinary way to do
+       this and reads as navy next to a real black. Only the component
+       hues, the maroon and the garden green are allowed chroma here.
+
+     text is #fff, not a softened off-white. The reference's contrast is
+       the point of it. Secondary and tertiary drop in luminance rather
+       than being greyed toward the background.
+
+   Also note --tip-bg, --banner-ink and --outdoor-ink: each of those used
+   to be a hardcoded colour that assumed a light page. On black the
+   tooltip was white-on-white. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg-dark: #000000;      /* app ground — the reference's own black */
+  --bg-medium: #0a0a0a;    /* header, sidebar */
+  --bg-light: #121212;     /* cards, panels */
+  --border-dark: #3d3d3d;
+  --border-medium: #272727;
+  --border-light: #1b1b1b;
+  --text-primary: #ffffff;
+  --text-secondary: #a6a6a6;
+  --text-tertiary: #6b6b6b;
+  --accent: #b04242;
+  /* In light mode this is the DARKER maroon used on hover. On a dark
+     ground "further from the background" means lighter, so the hover
+     direction flips with the theme rather than the token being renamed. */
+  --accent-dark: #cd6767;
+  --on-accent: #ffffff;
+
+  /* The component hues shift with the theme: the light triple is tuned
+     against white and muddies against black. These are the dark-mode
+     values already validated all-pairs for colour-vision deficiency
+     (worst CVD dE 9.4) — the one place chroma is not negotiable, since
+     they are the data. */
+  --sa: #3987e5;
+  --sb: #d95926;
+  --sc: #199e70;
+  --node-fill: #121212;
+  --node-line: #ffffff;
+
+  --dup: #e07a7a;
+  --shared: #b04242;
+  --warn: #cf9a45;
+  --banner-ink: #e07a7a;
+
+  --tip-bg: #1f1f1f;
+  --tip-ink: #ffffff;
+  --outdoor-ink: #93a37c;
+
+  /* Element fills invert their ORDER, not just their value: in light,
+     more ink means darker, so unit < corridor < core; on black more ink
+     means lighter, so the same ranking runs the other way. Graphite
+     steps, matching the metallic mid-tones in the reference. */
+  --fill-unit: #141414;
+  --fill-communal: #1f1f1f;
+  --fill-corridor: #2b2b2b;
+  --fill-core: #3d3d3d;
+  --fill-stairs: #333333;
+  --fill-outdoor: #223018;
+  --outdoor-line: #7d8a6a;
 }
 
 * { box-sizing: border-box; }
+
+html, body, #root { height: 100%; }
 
 body {
   margin: 0;
   background: var(--plane);
   color: var(--ink);
   font-family: var(--sans);
-  line-height: 1.5;
+  font-size: 13px;
+  line-height: 1.45;
+  letter-spacing: 0.2px;
   -webkit-font-smoothing: antialiased;
 }
 
-.app { max-width: 1400px; margin: 0 auto; padding: 24px 20px 56px; }
+button, select, input, label, h1, h2, h3, h4 { letter-spacing: 0.3px; }
 
-header { border-bottom: 1px solid var(--hair); padding-bottom: 18px; margin-bottom: 20px; }
-.eyebrow {
-  font-family: var(--mono); font-size: 11px; letter-spacing: 0.14em;
-  text-transform: uppercase; color: var(--ink-3); margin: 0 0 5px;
+/* --- app shell -----------------------------------------------------
+   Full viewport, three bands: header, then a sidebar and a main column
+   that scroll independently. The drawing is the subject, so it takes
+   every pixel the panels do not. */
+.app {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
-h1 { font-size: clamp(21px, 3vw, 29px); margin: 0; font-weight: 620; letter-spacing: -0.015em; }
 
-.layout { display: grid; grid-template-columns: 288px minmax(0, 1fr); gap: 20px; align-items: start; }
-@media (max-width: 940px) { .layout { grid-template-columns: minmax(0, 1fr); } }
+header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  padding: 12px 18px;
+  background: var(--bg-medium);
+  border-bottom: 1px solid var(--border-medium);
+}
+h1 { font-size: 24px; font-weight: 400; margin: 0; }
+h1 b { font-weight: 700; }
+header .sub {
+  font-size: 12px; font-weight: 500; letter-spacing: 0.5px;
+  text-transform: uppercase; color: var(--text-secondary);
+}
+/* Theme control sits at the far end of the header. `auto` is a real
+   third option rather than a hidden default — the app follows the OS
+   until you say otherwise, and you can see that it is doing so. */
+header .theme { margin-left: auto; align-self: center; }
+header .theme .seg button { padding: 4px 9px; }
 
-.panel { background: var(--paper); border: 1px solid var(--hair); padding: 14px; margin-bottom: 16px; }
+.layout {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 304px minmax(0, 1fr);
+}
+.sidebar {
+  height: 100%;
+  overflow-y: auto;
+  padding: 14px;
+  background: var(--bg-medium);
+  border-right: 1px solid var(--border-medium);
+}
+.main {
+  height: 100%;
+  overflow-y: auto;
+  padding: 14px 18px 24px;
+  display: flex;
+  flex-direction: column;
+}
+
+@media (max-width: 940px) {
+  .app { overflow: auto; height: auto; min-height: 100%; }
+  .layout { grid-template-columns: minmax(0, 1fr); }
+  .sidebar, .main { height: auto; overflow: visible; border-right: 0; }
+}
+
+.panel {
+  background: var(--bg-light);
+  border: 1px solid var(--border-light);
+  padding: 12px 13px;
+  margin-bottom: 12px;
+}
 .panel h2 {
-  font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.1em;
-  text-transform: uppercase; color: var(--ink-3); margin: 0 0 10px; font-weight: 600;
+  font-size: 13px; letter-spacing: 1px; text-transform: uppercase;
+  color: var(--text-secondary); margin: 0 0 9px; font-weight: 600;
 }
 
-.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 1px; background: var(--hair); border: 1px solid var(--hair); margin-bottom: 16px; }
-.stat { background: var(--paper); padding: 10px 12px; }
-.stat dt { font-family: var(--mono); font-size: 10px; letter-spacing: 0.09em; text-transform: uppercase; color: var(--ink-3); }
-.stat dd { margin: 2px 0 0; font-family: var(--mono); font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
-.stat dd .u { font-size: 11px; font-weight: 500; color: var(--ink-2); margin-left: 2px; }
+.stats {
+  flex: 0 0 auto;
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+  gap: 1px; background: var(--border-light);
+  border: 1px solid var(--border-light); margin-bottom: 12px;
+}
+.stat { background: var(--bg-light); padding: 8px 11px; }
+.stat dt {
+  font-size: 11px; letter-spacing: 1px; text-transform: uppercase;
+  color: var(--text-tertiary); font-weight: 500;
+}
+.stat dd {
+  margin: 1px 0 0; font-size: 18px; font-weight: 600;
+  font-variant-numeric: tabular-nums; letter-spacing: -0.02em;
+}
+.stat dd .u { font-size: 11px; font-weight: 500; color: var(--text-secondary); margin-left: 3px; }
 .stat.flag dd { color: var(--dup); }
 
-button, select, input { font: inherit; }
+/* --- controls ------------------------------------------------------
+   The spec's toolbar convention: 12px, uppercase, letter-spacing 0.5px,
+   buttons 600 and labels 500. Applied to every control, so the sidebar
+   and the toolbar read as one family. */
+button, select, input { font: inherit; font-family: var(--sans); }
+
 .btn {
-  font-family: var(--mono); font-size: 12.5px; background: var(--paper);
-  border: 1px solid var(--rule); color: var(--ink-2); padding: 6px 11px; cursor: pointer;
+  font-size: 12px; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase;
+  background: var(--bg-light); border: 1px solid var(--border-dark);
+  color: var(--text-secondary); padding: 6px 12px; cursor: pointer;
 }
-.btn:hover:not(:disabled) { color: var(--ink); border-color: var(--ink-3); }
+.btn:hover:not(:disabled) { color: var(--text-primary); border-color: var(--text-tertiary); }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
-.btn.primary { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.btn.primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+.btn.primary:hover:not(:disabled) { background: var(--accent-dark); border-color: var(--accent-dark); color: var(--on-accent); }
 .btn-row { display: flex; flex-wrap: wrap; gap: 6px; }
 
-.seg { display: inline-flex; border: 1px solid var(--rule); background: var(--paper); }
+.seg { display: inline-flex; border: 1px solid var(--border-dark); background: var(--bg-light); }
 .seg button {
-  font-family: var(--mono); font-size: 12.5px; background: none; border: 0;
-  padding: 6px 13px; cursor: pointer; color: var(--ink-2); border-right: 1px solid var(--hair);
+  font-size: 12px; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase;
+  background: none; border: 0; padding: 6px 14px; cursor: pointer;
+  color: var(--text-secondary); border-right: 1px solid var(--border-light);
 }
 .seg button:last-child { border-right: 0; }
-.seg button[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); }
 
-:where(button, input, select, [tabindex]):focus-visible { outline: 2px solid var(--sa); outline-offset: 2px; }
+:where(button, input, select, [tabindex]):focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px;
+}
 
-.toggles { display: flex; flex-wrap: wrap; gap: 4px 14px; }
-.toggles label { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ink-2); cursor: pointer; font-family: var(--mono); }
-.toggles input { accent-color: var(--sa); margin: 0; }
+.toggles { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; }
+.toggles label {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12px; font-weight: 500; letter-spacing: 0.5px; text-transform: uppercase;
+  color: var(--text-secondary); cursor: pointer;
+}
+.toggles input { accent-color: var(--accent); margin: 0; }
+.toggles select, .field {
+  font-size: 12px; letter-spacing: 0.5px; text-transform: uppercase; padding: 3px 5px;
+  background: var(--bg-light); color: var(--text-primary); border: 1px solid var(--border-medium);
+}
+/* A number the user types is data, not a label — not shouted, and on
+   tabular figures so it does not reflow as digits change. */
+.field.num { text-transform: none; letter-spacing: 0; font-variant-numeric: tabular-nums; }
+
+/* Storey stepper. Only shown once a plan actually stacks. */
+.levels { display: inline-flex; align-items: center; gap: 2px; border: 1px solid var(--border-dark); padding: 1px 4px; background: var(--bg-light); }
+.levels .lv { font-size: 12px; color: var(--text-primary); min-width: 22px; text-align: center; font-variant-numeric: tabular-nums; }
 
 /* --- program editor --- */
-.prog-list { list-style: none; margin: 0 0 10px; padding: 0; display: flex; flex-direction: column; gap: 3px; max-height: 340px; overflow-y: auto; }
-.prog-item { display: grid; grid-template-columns: 20px 1fr auto; align-items: center; gap: 7px; font-family: var(--mono); font-size: 12px; padding: 4px 6px; border: 1px solid transparent; }
-.prog-item:hover { border-color: var(--hair); background: var(--plane); }
-.prog-item .idx { color: var(--ink-3); font-variant-numeric: tabular-nums; font-size: 10.5px; }
-.prog-item .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.prog-item .meta { color: var(--ink-3); font-size: 10.5px; }
-.prog-item.is-communal .nm { color: var(--ink-2); font-style: italic; }
+.prog-list { list-style: none; margin: 0 0 10px; padding: 0; display: flex; flex-direction: column; gap: 2px; max-height: 320px; overflow-y: auto; }
+.prog-item { display: grid; grid-template-columns: 20px 1fr auto; align-items: center; gap: 7px; font-size: 12px; padding: 4px 6px; border: 1px solid transparent; }
+.prog-item:hover { border-color: var(--border-light); background: var(--bg-dark); }
+.prog-item .idx { color: var(--text-tertiary); font-variant-numeric: tabular-nums; font-size: 11px; }
+.prog-item .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; letter-spacing: 0.3px; }
+.prog-item .meta { color: var(--text-tertiary); font-size: 11px; font-weight: 400; letter-spacing: 0; }
+.prog-item.is-communal .nm { color: var(--text-secondary); font-style: italic; }
+/* Outdoor entries are marked in the list too — they leave the storey
+   sequence entirely and land on the ground, so seeing which ones they
+   are explains why they do not appear where they sit in the order. */
+.prog-item.is-outdoor { border-left: 2px solid var(--outdoor-line); }
+.prog-item.is-outdoor .nm { color: var(--outdoor-ink); font-style: normal; }
 .prog-item.is-suspect .nm { color: var(--warn); }
-.icon-btn { background: none; border: 0; color: var(--ink-3); cursor: pointer; padding: 1px 4px; font-family: var(--mono); font-size: 13px; line-height: 1; }
-.icon-btn:hover { color: var(--ink); }
+.icon-btn { background: none; border: 0; color: var(--text-tertiary); cursor: pointer; padding: 1px 4px; font-size: 13px; line-height: 1; }
+.icon-btn:hover { color: var(--text-primary); }
 .icon-btn:disabled { opacity: 0.25; cursor: not-allowed; }
 .add-row { display: flex; gap: 6px; }
-.add-row select { flex: 1; min-width: 0; font-family: var(--mono); font-size: 12px; padding: 5px; background: var(--paper); color: var(--ink); border: 1px solid var(--rule); }
+.add-row select { flex: 1; min-width: 0; font-size: 12px; letter-spacing: 0.5px; padding: 5px; background: var(--bg-light); color: var(--text-primary); border: 1px solid var(--border-medium); }
 
-/* --- viewport --- */
-.viewport { position: relative; background: var(--paper); border: 1px solid var(--hair); }
-.viewport svg, .viewport canvas { display: block; width: 100%; height: min(66vh, 640px); }
-.viewport svg { touch-action: none; cursor: grab; }
-.viewport svg.dragging { cursor: grabbing; }
-.viewport .hint { font-family: var(--mono); font-size: 11px; color: var(--ink-3); padding: 7px 12px; border-top: 1px solid var(--hair); display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+/* --- viewport ------------------------------------------------------
+   Takes the leftover height of the main column, and when the panels
+   below are long enough to push it (the Frame and Build tabs both
+   explain themselves at length) it stops at the floor and the column
+   scrolls instead. The floor is `min(880px, 74vh)` rather than a flat
+   number so a short window gets a proportionate drawing rather than a
+   viewport made almost entirely of prose.
+
+   The drawing is the subject and the prose underneath is reference, so
+   the floor is deliberately high: the panels scroll, the plan does not
+   shrink to make room for them. */
+.viewport {
+  position: relative; background: var(--bg-light); border: 1px solid var(--border-light);
+  display: flex; flex-direction: column;
+  flex: 1 1 auto; min-height: min(880px, 74vh);
+}
+.viewport > svg, .canvas-mount { flex: 1 1 auto; min-height: 0; width: 100%; display: block; }
+.viewport > svg { touch-action: none; cursor: grab; height: 100%; }
+.viewport > svg.dragging { cursor: grabbing; }
+/* three.js is told setSize(w, h, false), i.e. do not touch the canvas
+   style — so the CSS size has to come from here, filling the mount. */
+.canvas-mount canvas { display: block; width: 100%; height: 100%; }
+.viewport .hint {
+  flex: 0 0 auto; font-size: 11px; color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+  padding: 6px 12px; border-top: 1px solid var(--border-light);
+  display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+}
+
+/* --- growth animation readout --- */
+.growth { display: inline-flex; align-items: center; gap: 10px; }
+.growth .phase { color: var(--text-secondary); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.growth .track { width: 88px; height: 3px; background: var(--border-light); position: relative; overflow: hidden; }
+/* Width is written directly by the render loop, not by React. */
+.growth .fill { position: absolute; top: 0; bottom: 0; left: 0; width: 0; background: var(--accent); }
+.btn.mini { padding: 3px 8px; font-size: 11px; }
 
 .tip {
   position: absolute; pointer-events: none; opacity: 0; z-index: 5;
-  background: var(--ink); color: var(--paper); padding: 8px 10px;
-  font-family: var(--mono); font-size: 11.5px; line-height: 1.45; max-width: 240px;
+  background: var(--tip-bg); color: var(--tip-ink); padding: 8px 10px;
+  font-size: 11px; line-height: 1.45; max-width: 250px;
 }
-.tip strong { display: block; margin-bottom: 3px; font-size: 12.5px; }
-.tip .k { color: var(--ink-3); }
+.tip strong { display: block; margin-bottom: 3px; font-size: 12px; }
+.tip .k { color: var(--text-tertiary); }
 
-.toolbar { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; margin-bottom: 10px; }
+.toolbar { flex: 0 0 auto; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-bottom: 10px; }
 
-table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 12px; font-variant-numeric: tabular-nums; }
-th, td { text-align: left; padding: 4px 0; border-bottom: 1px solid var(--hair); }
-th { color: var(--ink-3); font-weight: 500; font-size: 10.5px; letter-spacing: 0.06em; text-transform: uppercase; }
+table { width: 100%; border-collapse: collapse; font-size: 11px; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 4px 0; border-bottom: 1px solid var(--border-light); }
+th { font-family: var(--sans); color: var(--text-tertiary); font-weight: 500; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; }
 td.n, th.n { text-align: right; }
 tr:last-child td { border-bottom: 0; }
 .swatch { display: inline-block; width: 15px; height: 3px; vertical-align: middle; margin-right: 7px; border-radius: 1.5px; }
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--node-fill); border: 1.4px solid var(--node-line); vertical-align: middle; margin: 0 5px 0 3px; }
 
-.note { font-size: 12.5px; color: var(--ink-2); line-height: 1.55; margin: 0; }
-.note b { color: var(--ink); }
+/* Full-width now means a genuinely long line, so prose is capped at a
+   readable measure rather than running the width of the screen. */
+.note { font-size: 12px; color: var(--text-secondary); line-height: 1.5; margin: 0; max-width: 104ch; }
+.note b { color: var(--text-primary); font-weight: 600; }
 .flagbar { border-left: 2px solid var(--dup); padding-left: 11px; }
-.sharedbar { border-left: 2px solid var(--shared); }
+.sharedbar { border-left: 2px solid var(--accent); }
 .warnbar { border-left: 2px solid var(--warn); padding-left: 11px; }
-.banner { padding: 10px 12px; border: 1px solid var(--dup); color: var(--dup); font-family: var(--mono); font-size: 12.5px; margin-bottom: 16px; background: var(--paper); }
-.muted { color: var(--ink-3); font-size: 12px; font-family: var(--mono); }
+.banner {
+  flex: 0 0 auto; padding: 9px 12px; border: 1px solid var(--dup); color: var(--banner-ink);
+  font-size: 12px; margin-bottom: 12px; background: var(--bg-light);
+}
+.muted { font-size: 12px; color: var(--text-tertiary); }
+/* The one genuinely monospace thing left: a shell command you would
+   paste. Everything else that used to be mono is Jost now. */
+code { font-family: var(--code); font-size: 11px; color: var(--text-primary); }
 
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
