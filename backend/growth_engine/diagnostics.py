@@ -16,6 +16,15 @@ COLLINEAR_TOL_CM, deliberately NOT importing walls.py's interval
 decomposition or its constants. Sharing them would mean a bug in the
 resolution logic would agree with itself and pass silently.
 
+That is not hypothetical -- it happened. Both sides independently decided
+a wall belonged to one storey, the element's own el.level, so a duplex
+spanning levels 0-1 never met the level-1 unit beside it: growth built
+that party wall twice and this module skipped the pair by the same test.
+177m of doubled wall verified as clean. Independence only buys anything
+where the two do not share the assumption. Both now work per OCCUPIED
+storey -- see `_storeys`, derived here rather than imported, which is
+also why `wall_length` counts a duplex's perimeter once per floor.
+
 `verify_walls` puts the two together and asserts the invariant:
 
     resolved + dropped == naive - shared
@@ -23,8 +32,12 @@ resolution logic would agree with itself and pass silently.
 i.e. every shared stretch is present exactly once. It returns a report
 rather than raising, so the API can surface it (`/api/plan` does, on
 every response) and it can act as a regression guard. On the default
-program it holds to 0.00m: 550.33m naive, 171.29m shared, 378.99m
-resolved across 59 walls, 28 of them shared.
+program it holds to 0.00m: 688.01m naive, 160.25m shared, 527.76m
+resolved across 94 walls, 29 of them shared -- 1,583 m2 of wall.
+
+(Those replace 550.33 / 171.29 / 378.99 across 59 walls. The resolved
+total rose because a duplex's upper storey now carries walls of its own,
+which is the material you build; it is not a regression.)
 """
 
 from __future__ import annotations
