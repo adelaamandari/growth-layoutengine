@@ -3,9 +3,14 @@
 Context for whoever (human or Claude) picks this up next. This covers everything
 decided so far, so it doesn't need to be re-explained.
 
-*Last revised 2026-07-31. Blockquoted notes mark where this document was
+*Last revised 2026-08-11. Blockquoted notes mark where this document was
 corrected or where a stated intention has since been implemented; the
 surrounding text is the original.*
+
+*Figures quoted here are from **seed 42** unless stated. Shared spaces draw
+their size from a range, so an unseeded plan totals differently every run —
+several numbers in this file were once quoted unseeded and could never be
+reproduced. If a figure has no seed, treat it as indicative.*
 
 ## Core geometric logic (the timber joinery system)
 
