@@ -81,6 +81,7 @@
   /* Element fills — tints of the spec's semantic zones. */
   --fill-corridor: #cfccc6;   /* spec: corridor */
   --fill-core: #bdbab5;       /* spec: default/fallback */
+  --fill-stairs: #cbc8c2;     /* a shade off the core, so the two read apart */
   --fill-unit: #f3eeee;       /* residential #6e2424, tinted */
   --fill-communal: #e7e5e0;   /* private communal #6a665f, tinted */
   --fill-outdoor: #ccd6bd;    /* green areas #7d8a6a, tinted */
@@ -165,6 +166,7 @@
   --fill-communal: #1f1f1f;
   --fill-corridor: #2b2b2b;
   --fill-core: #3d3d3d;
+  --fill-stairs: #333333;
   --fill-outdoor: #223018;
   --outdoor-line: #7d8a6a;
 }

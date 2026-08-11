@@ -214,7 +214,7 @@ def _choose(kind: str, level: int, run_rank: int, n: int, i: int) -> tuple[str, 
                             longest elevation, so a lobby or a gym takes
                             its light on its best face.
     """
-    if kind in ("corridor", "core"):
+    if kind in ("corridor", "core", "stairs"):
         return "C", "circulation — no shading needed"
 
     if kind == "communal":

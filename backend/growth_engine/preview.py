@@ -60,6 +60,7 @@ NODE_FILL = "#fcfcfb"
 KIND_FILL = {
     "corridor": "#e8e6df",
     "core": "#d6d2c6",
+    "stairs": "#c9c4b4",
     "unit": "#faf9f5",
     "communal": "#f0ece1",
     "outdoor": "#dfeacd",

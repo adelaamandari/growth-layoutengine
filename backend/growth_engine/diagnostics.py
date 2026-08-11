@@ -271,7 +271,11 @@ def access_report(plan, limit_cm: float = 2000.0) -> dict:
         n = len(el.corners)
         return (sum(c.x for c in el.corners) / n, sum(c.y for c in el.corners) / n)
 
-    cores = [e for e in plan.elements if e.kind == "core"]
+    # Cores AND stairs. Both are vertical circulation, and since the lift
+    # core was capped at two per storey it is the stairs that actually
+    # carry the escape distance -- measuring to cores alone would report
+    # a catastrophic regression while the building got better.
+    cores = [e for e in plan.elements if e.kind in ("core", "stairs")]
     rooms = [e for e in plan.elements if e.kind in ("unit", "communal")]
 
     worst = 0.0
@@ -293,6 +297,8 @@ def access_report(plan, limit_cm: float = 2000.0) -> dict:
                 if e.kind == "outdoor")
     return {
         "cores": len(cores),
+        "lift_cores": sum(1 for e in cores if e.kind == "core"),
+        "stairs": sum(1 for e in cores if e.kind == "stairs"),
         "max_to_core_m": round(worst / 100, 1),
         "limit_m": limit_cm / 100,
         "rooms_over_limit": over,

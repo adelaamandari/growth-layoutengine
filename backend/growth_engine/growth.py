@@ -68,7 +68,8 @@ from .walls import Wall, resolve_walls, walls_by_owner
 # were off, uniformly by 10x.
 CORRIDOR_WIDTH_CM = 170.0        # 1.7m total width, walls included
 CORRIDOR_HALF = CORRIDOR_WIDTH_CM / 2
-# The core holds a LIFT AND A STAIR, so it is sized to hold them.
+# The core holds a LIFT AND AN EMERGENCY STAIR. Vertical circulation
+# proper is a separate element -- see STAIR_SIZE_CM below.
 #
 # It was 170x170 -- 2.9m2, the same square as the corridor is wide.
 # PROJECT_SUMMARY has flagged that as an open question since the number
@@ -76,24 +77,42 @@ CORRIDOR_HALF = CORRIDOR_WIDTH_CM / 2
 # alone a lift beside them. Adela settled it by pointing at the Core and
 # Stairs components: the core is a real room, not an anchor point.
 #
-# Sized off the one dimension here that is surveyed, the 360cm bay:
-# ONE BAY of frontage on the corridor by TWO BAYS deep, 3.6 x 7.2m,
-# 25.9m2. That holds an 8-person accessible lift (about 2.2 x 2.4m
-# structural) and a switchback stair beside it (about 2.5 x 5.0m for a
-# 3m floor-to-floor), with the landing between them. A residential core
-# with one lift and one stair runs 20-25m2 in practice, so this is right
-# rather than generous.
+# Adela's dimension is 6x3, stretched to the grid: TWO BAYS of frontage
+# on the corridor by ONE BAY deep, 7.2 x 3.6m, 25.9m2. Along the 7.2 the
+# emergency stair takes about 5.0 and the lift about 2.2; both clear the
+# 3.6 depth (a stair wants 2.5, an 8-person accessible lift 2.4). Same
+# area as the 3.6 x 7.2 it replaces, turned through 90 degrees, which is
+# the better way round: a core one bay deep sits in a band rather than
+# driving two bays back through the rooms behind it.
 #
 # Whole bays, not a rounded-up dimension, and that is the second reason
 # for it: a core on the grid CONTAINS grid nodes, so it always carries
 # its own columns. The stair was the worst offender in the support
 # report when it was 170 wide and fell between grid lines.
-CORE_RUN_CM = 1 * BAY_CM         # frontage on the corridor
-CORE_DEPTH_CM = 2 * BAY_CM       # how far it reaches back off it
+CORE_RUN_CM = 2 * BAY_CM         # frontage on the corridor
+CORE_DEPTH_CM = 1 * BAY_CM       # how far it reaches back off it
 # Kept because branch starts and the entry run measure from the core's
 # centre, and which half depends on which way you leave it.
 CORE_RUN_HALF = CORE_RUN_CM / 2
 CORE_DEPTH_HALF = CORE_DEPTH_CM / 2
+
+# A lift core is expensive and wants to be rare. Two per storey on a
+# site this size, which is Adela's call and the usual one -- you do not
+# put a firefighting core every 8 metres. Escape distance is carried by
+# the stairs below instead, which is what makes the split worth having.
+MAX_CORES_PER_LEVEL = 2
+
+# Vertical circulation proper: a stair, no lift, 3x3 stretched to one
+# whole bay. 3.6 x 3.6m is tight for a 3m floor-to-floor and it does
+# work -- about 4.25m of going at a 175mm rise, so a switchback with two
+# roughly 2.4m flights and a landing between. It would not take a single
+# straight flight, which needs the full 5m in one direction.
+STAIR_SIZE_CM = 1 * BAY_CM
+STAIR_HALF = STAIR_SIZE_CM / 2
+
+# No two stairs closer than this. Looser than the core rule because a
+# stair is 13m2 rather than 26 and its whole job is to be near things.
+STAIR_MIN_SPACING_CM = 2 * BAY_CM
 
 # No two cores closer than this, centre to centre, on one storey.
 #
@@ -128,7 +147,7 @@ OUTDOOR_HEIGHT_CM = 15.0
 # ground has no perimeter to build. Keeping the test in ONE place is the
 # point: walls.py, frame.py and diagnostics.py must agree about what has
 # a wall, or verify_walls fails against its own plan.
-WALLED_KINDS = ("corridor", "core", "unit", "communal")
+WALLED_KINDS = ("corridor", "core", "stairs", "unit", "communal")
 
 # One storey. Matches massing.DEFAULT_FLOOR_HEIGHT_CM and frame.STOREY_CM;
 # a duplex's surveyed 600cm is exactly two of these.
@@ -174,7 +193,7 @@ RESIDENTIAL_KEYS = (
 
 @dataclass
 class PlacedElement:
-    kind: str                 # "corridor" | "core" | "unit" | "communal" | "outdoor"
+    kind: str                 # "corridor" | "core" | "stairs" | "unit" | "communal" | "outdoor"
     label: str                # e.g. "1Bed_A", "SK"
     corners: list[Point]      # 4 corners, in order
     height_cm: float = 300.0  # default single floor
@@ -262,7 +281,7 @@ def _assign_growth_steps(elements: list[PlacedElement]) -> None:
     """
     # Outdoor areas rank last: the ground around a building is laid out
     # after the building, and the animation reads better for it.
-    rank = {"corridor": 1, "core": 0, "unit": 2, "communal": 2, "outdoor": 3}
+    rank = {"corridor": 1, "core": 0, "stairs": 1, "unit": 2, "communal": 2, "outdoor": 3}
     # The entry run is elements[0] by construction, and it is the one
     # corridor that should precede the core rather than follow it.
     order = sorted(
@@ -717,6 +736,9 @@ def generate_floorplan(program: list[str], seed: int | None = None,
 
     qi = 0
     level = 0
+    # Vertical circulation, decided once on level 0 and repeated up the
+    # building. (kind, label, corners) -- see where it is replayed below.
+    vert_slots: list[tuple[str, str, list]] = []
     level_branches: list[tuple[int, list[dict]]] = []
     max_iterations = len(program) * 12  # safety valve against infinite retry loops
     iterations = 0
@@ -728,6 +750,26 @@ def generate_floorplan(program: list[str], seed: int | None = None,
         # only the upper halves of the duplexes below. Storeys above the
         # topmost occupied one are pruned after the loop.
         _add_core(elements, occupied, core_pos, level=level, axes=(u_ax, v_ax))
+
+        # Every other lift core and stair, in the position it was given
+        # on level 0. Vertical circulation has to STACK: a shaft decided
+        # afresh on each storey is a lift that moves sideways between
+        # floors and a stair you cannot climb. The main core always
+        # stacked, because it is placed from the same core_pos each time;
+        # the ones the run walk found did not, and landed metres apart
+        # storey to storey.
+        #
+        # Placed BEFORE the units on this level rather than during the
+        # walk, so the rooms grow around the circulation instead of the
+        # circulation squeezing into what the rooms left. Where an upper
+        # storey has stepped back past a slot it simply is not there, and
+        # that shaft serves the storeys below it -- which is a real
+        # building, not a failure.
+        for kind_v, label_v, poly_v in vert_slots:
+            if _on_site(poly_v, boundary) and _is_free(occupied, level, 1, poly_v):
+                _reserve(occupied, level, 1, poly_v)
+                elements.append(PlacedElement(kind_v, label_v, poly_v, level=level))
+
         branches = _make_branches(core_pos, (u_ax, v_ax))
         if branch_depth >= 2:
             branches.extend(_spawn_tertiary(branches, tertiary_pitch_cm,
@@ -770,7 +812,7 @@ def generate_floorplan(program: list[str], seed: int | None = None,
             # rather than on the centreline: a core straddling the
             # corridor would be overlapped by it when the corridor is
             # emitted, and a stair you cannot walk past is a dead end.
-            if core_pitch_cm:
+            if core_pitch_cm and level == 0:
                 for br_c, side_c in runs:
                     okey = "offset_l" if side_c == -1 else "offset_r"
                     rkey = (id(br_c), side_c)
@@ -818,12 +860,23 @@ def generate_floorplan(program: list[str], seed: int | None = None,
                     e0 = a0 + br_c["pd"].scaled(side_c * CORRIDOR_HALF)
                     e1 = a1 + br_c["pd"].scaled(side_c * CORRIDOR_HALF)
                     out_c = br_c["pd"].scaled(side_c)
-                    # One bay of frontage on the corridor, two bays back
-                    # off it -- the lift and the stair beside each other,
-                    # reached from the corridor face.
+                    # A CORE if the storey has not had its two yet,
+                    # otherwise a STAIR. The lift core is the expensive
+                    # one and is capped; escape distance is carried by
+                    # stairs, which is the whole point of splitting them.
+                    n_cores = sum(1 for e in elements
+                                  if e.kind == "core" and e.level == level)
+                    if n_cores < MAX_CORES_PER_LEVEL:
+                        kind_c, label_c = "core", "Core"
+                        run_c, depth_c = CORE_RUN_CM, CORE_DEPTH_CM
+                    else:
+                        kind_c, label_c = "stairs", "Stairs"
+                        run_c, depth_c = STAIR_SIZE_CM, STAIR_SIZE_CM
+                    a1 = br_c["start"] + br_c["dir"].scaled(br_c[okey] + run_c)
+                    e1 = a1 + br_c["pd"].scaled(side_c * CORRIDOR_HALF)
                     cc = _rect(e0, e1,
-                               e1 + out_c.scaled(CORE_DEPTH_CM),
-                               e0 + out_c.scaled(CORE_DEPTH_CM))
+                               e1 + out_c.scaled(depth_c),
+                               e0 + out_c.scaled(depth_c))
                     # Not within CORE_MIN_SPACING_CM of a stair this
                     # storey already has. core_pitch_cm only bounds the
                     # walk along ONE run and keeps its count per side, so
@@ -832,21 +885,28 @@ def generate_floorplan(program: list[str], seed: int | None = None,
                     # serving the same rooms, which is what Adela saw.
                     ccx = sum(c.x for c in cc) / len(cc)
                     ccy = sum(c.y for c in cc) / len(cc)
+                    # Spacing is measured against the SAME kind. Two
+                    # lift cores must not huddle; a stair next to a core
+                    # is fine and often right, because the stair is there
+                    # to shorten a walk the core cannot.
                     crowded = False
                     for other in elements:
-                        if other.kind != "core" or other.level != level:
+                        if other.kind != kind_c or other.level != level:
                             continue
                         ox_ = sum(c.x for c in other.corners) / len(other.corners)
                         oy_ = sum(c.y for c in other.corners) / len(other.corners)
-                        if ((ccx - ox_) ** 2 + (ccy - oy_) ** 2) ** 0.5 < CORE_MIN_SPACING_CM:
+                        gap_min = (CORE_MIN_SPACING_CM if kind_c == "core"
+                                   else STAIR_MIN_SPACING_CM)
+                        if ((ccx - ox_) ** 2 + (ccy - oy_) ** 2) ** 0.5 < gap_min:
                             crowded = True
                             break
                     if (not crowded and _on_site(cc, boundary)
                             and _is_free(occupied, level, 1, cc)):
                         _reserve(occupied, level, 1, cc)
-                        elements.append(PlacedElement("core", "Core", cc,
+                        elements.append(PlacedElement(kind_c, label_c, cc,
                                                       level=level))
-                        br_c[okey] += CORE_RUN_CM
+                        vert_slots.append((kind_c, label_c, cc))
+                        br_c[okey] += run_c
                     last_core[rkey] = br_c[okey]
 
             placed = False

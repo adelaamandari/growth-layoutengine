@@ -54,6 +54,9 @@ export const sceneTheme = (theme) => SCENES[theme] ?? SCENES.light;
 export const KIND_COLOR = {
   corridor: 0xcfccc6,   // spec: corridor
   core: 0x9a9690,       // spec: core / lobby
+  // The stair reads a shade lighter than the lift core, so the two kinds
+  // of vertical circulation are tellable apart in plan without a legend.
+  stairs: 0xb0aca6,
   unit: 0xeaedf0,       // --border-light
   communal: 0xd3d8dd,   // --border-medium
   room: 0xe4e7ea,       // --bg-medium
