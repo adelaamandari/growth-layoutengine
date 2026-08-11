@@ -117,14 +117,36 @@ That file is *not* in this repo.
   not just a centerline. Rooms attach flush against the corridor's outer wall
   edge, never overlapping it, because their geometry starts exactly at that
   edge.
-- **Core**: a defined **170×170cm** square, walled like a room, representing
-  vertical circulation/structural anchor. Corridors run flush into its edges.
+- **Core**: **360 × 720 cm** — one bay of frontage on the corridor by two bays
+  deep, 25.9m², holding a lift and a stair. Corridors run flush into its
+  frontage.
 
-  > **Open question.** 170×170cm is 2.9m² — the consistent ÷10 of the old
-  > value, but too small to hold a flight and landing. If the core really is
-  > vertical circulation, it needs a real dimension (a single stair core wants
-  > roughly 250×500cm). If it is a structural anchor only, 170 is fine. This
-  > is the one corrected number that was *not* independently confirmed.
+  > **Resolved 2026-08-11**, and it had been open a while. This said 170×170
+  > — 2.9m², the consistent ÷10 of the old value — with the note: *"too small
+  > to hold a flight and landing. If the core really is vertical circulation,
+  > it needs a real dimension (a single stair core wants roughly 250×500cm).
+  > If it is a structural anchor only, 170 is fine. This is the one corrected
+  > number that was not independently confirmed."*
+  >
+  > Adela settled it by pointing at the Core and Stairs components: the core
+  > is a real room. There is no surveyed geometry for either in this repo, so
+  > it is sized off the one dimension here that IS surveyed — the 360 bay.
+  > 3.6 × 7.2m takes an 8-person accessible lift (about 2.2 × 2.4m
+  > structural) and a switchback stair beside it (about 2.5 × 5.0m at a 3m
+  > floor-to-floor), with the landing between. Real residential cores with one
+  > lift and one stair run 20–25m², so this is right rather than generous.
+  >
+  > Whole bays for a second reason: a core on the grid CONTAINS grid nodes, so
+  > it always carries its own columns. At 170 wide it fell between grid lines
+  > and was the worst offender in the support report — a stair with an
+  > unsupported floor.
+  >
+  > Two consequences, both measured. `CORE_MIN_SPACING_CM` (4 bays) stops two
+  > stairs landing opposite each other across a corridor, which `core_pitch_cm`
+  > could not because it counts per run and per side. And `core_pitch_cm` went
+  > back to 800: at 1600 the new size gave 7.5 cores and a 43.4m worst walk,
+  > against 12 cores and 19.7m at 800. That is not undoing the earlier halving
+  > — 12 big cores is still half of the 25 small ones it replaced.
 - **Branching**: strictly **orthogonal** (90° turns only — straight, left,
   right from the core). Diagonal branches were tried and rejected — they
   caused overlapping reserved zones near the core that made room placement

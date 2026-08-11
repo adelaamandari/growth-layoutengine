@@ -60,7 +60,8 @@ from .growth import (
     CORRIDOR_WIDTH_CM,
     ENTRY_CORRIDOR_BAYS_CM,
     generate_floorplan,
-    CORE_SIZE_CM,
+    CORE_DEPTH_CM,
+    CORE_RUN_CM,
     LEVEL_HEIGHT_CM,
     MAX_LEVELS,
     OUTDOOR_HEIGHT_CM,
@@ -283,11 +284,11 @@ def generate_site_floorplan(program: list[str], site, seed: int | None = None,
 
     while qi < len(built) and level < max_levels:
         # The core is the stair: on every storey the building reaches.
-        core = _rect(Point(core_at.x - ent_u.x * CORE_SIZE_CM / 2
-                           - ent_n.x * CORE_SIZE_CM / 2,
-                           core_at.y - ent_u.y * CORE_SIZE_CM / 2
-                           - ent_n.y * CORE_SIZE_CM / 2),
-                     None, ent_u, ent_n, CORE_SIZE_CM, CORE_SIZE_CM)
+        core = _rect(Point(core_at.x - ent_u.x * CORE_RUN_CM / 2
+                           - ent_n.x * CORE_DEPTH_CM / 2,
+                           core_at.y - ent_u.y * CORE_RUN_CM / 2
+                           - ent_n.y * CORE_DEPTH_CM / 2),
+                     None, ent_u, ent_n, CORE_RUN_CM, CORE_DEPTH_CM)
         _place(elements, occupied, boundary, "core", "Core", core, level)
 
         # All frontages grow TOGETHER, one bay each in turn, rather than
@@ -398,7 +399,17 @@ def _grow_spine_once(program: list[str], site, seed: int | None = None,
                              max_branch_cm: float = 4000.0,
                              branch_depth: int = 2,
                              program_repeat: int = 1,
-                             core_pitch_cm: float = 1600.0,
+                             # 8m, not the 1600 it was. That 1600 halved a
+                             # count of 25-28 stairs that were 170 squares;
+                             # a core is now a real 3.6x7.2m room with a
+                             # lift and a stair in it, so the same pitch
+                             # yields 12 -- still about half the original,
+                             # which is what was asked for, but now because
+                             # each one is a building's worth of core
+                             # rather than because the pitch starves them.
+                             # At 1600 with the new size the worst walk ran
+                             # to 43.4m against a 20m target.
+                             core_pitch_cm: float = 800.0,
                              courtyard_ratio: float = 0.16,
                              street_names=None) -> FloorPlan:
     """
@@ -1035,7 +1046,7 @@ def generate_spine_floorplan(program, site, seed=None, inset_m: float = 6.0,
                              max_branch_cm: float = 4000.0,
                              branch_depth: int = 2,
                              program_repeat: int = 1,
-                             core_pitch_cm: float = 1600.0,
+                             core_pitch_cm: float = 800.0,
                              courtyard_ratio: float = 0.16,
                              street_names=None,
                              attempts: int = 4) -> FloorPlan:

@@ -68,8 +68,47 @@ from .walls import Wall, resolve_walls, walls_by_owner
 # were off, uniformly by 10x.
 CORRIDOR_WIDTH_CM = 170.0        # 1.7m total width, walls included
 CORRIDOR_HALF = CORRIDOR_WIDTH_CM / 2
-CORE_SIZE_CM = 170.0             # 1.7x1.7m -- see PROJECT_SUMMARY, may need revisiting
-CORE_HALF = CORE_SIZE_CM / 2
+# The core holds a LIFT AND A STAIR, so it is sized to hold them.
+#
+# It was 170x170 -- 2.9m2, the same square as the corridor is wide.
+# PROJECT_SUMMARY has flagged that as an open question since the number
+# was first corrected: 2.9m2 cannot take a flight and a landing, let
+# alone a lift beside them. Adela settled it by pointing at the Core and
+# Stairs components: the core is a real room, not an anchor point.
+#
+# Sized off the one dimension here that is surveyed, the 360cm bay:
+# ONE BAY of frontage on the corridor by TWO BAYS deep, 3.6 x 7.2m,
+# 25.9m2. That holds an 8-person accessible lift (about 2.2 x 2.4m
+# structural) and a switchback stair beside it (about 2.5 x 5.0m for a
+# 3m floor-to-floor), with the landing between them. A residential core
+# with one lift and one stair runs 20-25m2 in practice, so this is right
+# rather than generous.
+#
+# Whole bays, not a rounded-up dimension, and that is the second reason
+# for it: a core on the grid CONTAINS grid nodes, so it always carries
+# its own columns. The stair was the worst offender in the support
+# report when it was 170 wide and fell between grid lines.
+CORE_RUN_CM = 1 * BAY_CM         # frontage on the corridor
+CORE_DEPTH_CM = 2 * BAY_CM       # how far it reaches back off it
+# Kept because branch starts and the entry run measure from the core's
+# centre, and which half depends on which way you leave it.
+CORE_RUN_HALF = CORE_RUN_CM / 2
+CORE_DEPTH_HALF = CORE_DEPTH_CM / 2
+
+# No two cores closer than this, centre to centre, on one storey.
+#
+# core_pitch_cm bounds the walk ALONG a run since its last stair, and
+# `last_core` is keyed per (branch, side) -- so the two sides of one
+# corridor each keep their own counter and can put a stair opposite a
+# stair. Adela caught exactly that: two cores either side of a corridor,
+# metres apart, serving the same few rooms twice.
+CORE_MIN_SPACING_CM = 4 * BAY_CM
+
+# Deprecated alias. Nothing should read a single "core size" now that it
+# is not square; kept so an old import fails loudly at the edit rather
+# than silently building a 170 square somewhere.
+CORE_SIZE_CM = CORE_RUN_CM
+CORE_HALF = CORE_RUN_HALF
 ENTRY_CORRIDOR_BAYS_CM = 340.0   # entrance straight run before reaching core (2 bays)
 
 # Shared-space sizes used to live here as a single frontage/depth pair
@@ -330,11 +369,11 @@ def _add_core(elements, occupied, core_pos: Point, level: int = 0, axes=None):
     the middle of its own building.
     """
     u, v = axes if axes else (Point(1.0, 0.0), Point(0.0, 1.0))
-    c1 = Point(core_pos.x - (u.x + v.x) * CORE_HALF,
-               core_pos.y - (u.y + v.y) * CORE_HALF)
-    c2 = Point(c1.x + u.x * CORE_SIZE_CM, c1.y + u.y * CORE_SIZE_CM)
-    c3 = Point(c2.x + v.x * CORE_SIZE_CM, c2.y + v.y * CORE_SIZE_CM)
-    c4 = Point(c1.x + v.x * CORE_SIZE_CM, c1.y + v.y * CORE_SIZE_CM)
+    c1 = Point(core_pos.x - u.x * CORE_RUN_HALF - v.x * CORE_DEPTH_HALF,
+               core_pos.y - u.y * CORE_RUN_HALF - v.y * CORE_DEPTH_HALF)
+    c2 = Point(c1.x + u.x * CORE_RUN_CM, c1.y + u.y * CORE_RUN_CM)
+    c3 = Point(c2.x + v.x * CORE_DEPTH_CM, c2.y + v.y * CORE_DEPTH_CM)
+    c4 = Point(c1.x + v.x * CORE_DEPTH_CM, c1.y + v.y * CORE_DEPTH_CM)
     corners = _rect(c1, c2, c3, c4)
     elements.append(PlacedElement("core", "Core", corners, level=level))
     _reserve(occupied, level, 1, corners)
@@ -420,8 +459,13 @@ def _make_branches(core_pos: Point, axes=None) -> list[dict]:
     branches = []
     for d in (Point(-v.x, -v.y), Point(-u.x, -u.y), u):
         pd_ = Point(-d.y, d.x)
+        # Leave from the core's FACE, and the core is no longer square:
+        # going along v you clear its depth, along u its frontage. A
+        # single CORE_HALF here would have started the v branch 180cm
+        # inside a core that reaches 360.
+        half = CORE_DEPTH_HALF if abs(d.x * u.x + d.y * u.y) < 0.5 else CORE_RUN_HALF
         branches.append({
-            "dir": d, "pd": pd_, "start": core_pos + d.scaled(CORE_HALF),
+            "dir": d, "pd": pd_, "start": core_pos + d.scaled(half),
             "offset_l": 0.0, "offset_r": 0.0, "depth": 0,
         })
     return branches
@@ -669,7 +713,7 @@ def generate_floorplan(program: list[str], seed: int | None = None,
     # The entry run belongs to the ground floor only. Upper storeys
     # reach the branches through the core, which is the stair.
     _add_corridor(elements, occupied, entrance,
-                  core_pos + entry_dir.scaled(-CORE_HALF), entry_dir, level=0)
+                  core_pos + entry_dir.scaled(-CORE_DEPTH_HALF), entry_dir, level=0)
 
     qi = 0
     level = 0
@@ -761,27 +805,48 @@ def generate_floorplan(program: list[str], seed: int | None = None,
                     k = 0
                     while SNAP_CORES_TO_GRID and k * step <= STRUCTURAL_GRID_CM:
                         for cand_off in (base_off + k * step,):
-                            m0 = br_c["start"] + br_c["dir"].scaled(cand_off + CORE_HALF)
+                            m0 = br_c["start"] + br_c["dir"].scaled(cand_off + CORE_RUN_HALF)
                             centre = m0 + br_c["pd"].scaled(
-                                side_c * (CORRIDOR_HALF + CORE_HALF))
+                                side_c * (CORRIDOR_HALF + CORE_DEPTH_HALF))
                             g = grid_offset_cm(centre, entrance, (u_ax, v_ax))
                             if best_gap is None or g < best_gap:
                                 best_off, best_gap = cand_off, g
                         k += 1
                     br_c[okey] = best_off
                     a0 = br_c["start"] + br_c["dir"].scaled(br_c[okey])
-                    a1 = br_c["start"] + br_c["dir"].scaled(br_c[okey] + CORE_SIZE_CM)
+                    a1 = br_c["start"] + br_c["dir"].scaled(br_c[okey] + CORE_RUN_CM)
                     e0 = a0 + br_c["pd"].scaled(side_c * CORRIDOR_HALF)
                     e1 = a1 + br_c["pd"].scaled(side_c * CORRIDOR_HALF)
                     out_c = br_c["pd"].scaled(side_c)
+                    # One bay of frontage on the corridor, two bays back
+                    # off it -- the lift and the stair beside each other,
+                    # reached from the corridor face.
                     cc = _rect(e0, e1,
-                               e1 + out_c.scaled(CORE_SIZE_CM),
-                               e0 + out_c.scaled(CORE_SIZE_CM))
-                    if _on_site(cc, boundary) and _is_free(occupied, level, 1, cc):
+                               e1 + out_c.scaled(CORE_DEPTH_CM),
+                               e0 + out_c.scaled(CORE_DEPTH_CM))
+                    # Not within CORE_MIN_SPACING_CM of a stair this
+                    # storey already has. core_pitch_cm only bounds the
+                    # walk along ONE run and keeps its count per side, so
+                    # without this the two sides of a corridor put a
+                    # stair opposite a stair -- two cores metres apart
+                    # serving the same rooms, which is what Adela saw.
+                    ccx = sum(c.x for c in cc) / len(cc)
+                    ccy = sum(c.y for c in cc) / len(cc)
+                    crowded = False
+                    for other in elements:
+                        if other.kind != "core" or other.level != level:
+                            continue
+                        ox_ = sum(c.x for c in other.corners) / len(other.corners)
+                        oy_ = sum(c.y for c in other.corners) / len(other.corners)
+                        if ((ccx - ox_) ** 2 + (ccy - oy_) ** 2) ** 0.5 < CORE_MIN_SPACING_CM:
+                            crowded = True
+                            break
+                    if (not crowded and _on_site(cc, boundary)
+                            and _is_free(occupied, level, 1, cc)):
                         _reserve(occupied, level, 1, cc)
                         elements.append(PlacedElement("core", "Core", cc,
                                                       level=level))
-                        br_c[okey] += CORE_SIZE_CM
+                        br_c[okey] += CORE_RUN_CM
                     last_core[rkey] = br_c[okey]
 
             placed = False
