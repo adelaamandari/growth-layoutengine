@@ -502,7 +502,7 @@ export default function App() {
                     catalog={facadeCatalog} facade={facade} massing={massing}
                     frame={frame} theme={theme}
                     showMassing={showMassing} showFrame={showFrameBehind}
-                    heat={heatmap} only={onlyPanel || null} site={site}
+                    heat={heatmap} only={onlyPanel || null} site={site} animate={animateGrowth}
                   />
                 )
               )}

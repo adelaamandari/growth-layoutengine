@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import { CM_TO_M, buildFrameInstances } from "./frameInstances";
+import {
+  CM_TO_M, buildFrameInstances, clamp01, prefersReducedMotion,
+} from "./frameInstances";
 import { KIND_COLOR, KIND_FALLBACK, applySceneTheme, sceneTheme } from "../theme";
 import { addSiteOutline, prismGeometry } from "./prism";
 
@@ -61,7 +63,16 @@ const ORDER = ["A", "B", "C", "D", "E", "H", "G", "F", "I"];
  */
 function buildPanelInstances(catalog, panels, box, only, heat) {
   const byKey = Object.fromEntries(catalog.panels.map((p) => [p.key, p]));
-  const shown = panels.filter((p) => !only || only === p.panel);
+  // Ordered BY TYPE, because that is what the growth reveals: A, then B,
+  // and so on to I. Sorting the instances themselves rather than
+  // shuffling them at draw time is what makes the animation free --
+  // InstancedMesh.count renders the first N instances, so revealing is
+  // one integer per frame and no matrices are touched.
+  const rank = Object.fromEntries(ORDER.map((k, i) => [k, i]));
+  const shown = panels
+    .filter((p) => !only || only === p.panel)
+    .slice()
+    .sort((a, b) => (rank[a.panel] ?? 99) - (rank[b.panel] ?? 99));
   let total = 0;
   for (const p of shown) total += byKey[p.panel]?.members.length ?? 0;
 
@@ -74,10 +85,19 @@ function buildPanelInstances(catalog, panels, box, only, heat) {
   const dummy = new THREE.Object3D();
   const colour = new THREE.Color();
   let i = 0;
+  // One entry per type actually present, in reveal order: where its
+  // instances end, and how many panels it drew.
+  const steps = [];
+  let current = null;
 
   for (const p of shown) {
     const type = byKey[p.panel];
     if (!type) continue;
+    if (!current || current.type !== p.panel) {
+      current = { type: p.panel, panels: 0, end: i };
+      steps.push(current);
+    }
+    current.panels += 1;
     // Heatmap replaces the type colour rather than tinting it: two
     // colour scales on one object read as neither.
     colour.setHex(heat ? heatColor(p.sun_norm ?? 0) : (PANEL_COLOR[p.panel] ?? 0xb08d5c));
@@ -107,18 +127,25 @@ function buildPanelInstances(catalog, panels, box, only, heat) {
       if (box) box.expandByPoint(new THREE.Vector3(
         wx * CM_TO_M, wz * CM_TO_M, -wy * CM_TO_M));
     }
+    // Per PANEL, not per type: the reveal walks instance by instance, so
+    // each panel of a type has to move the boundary it stops at.
+    current.end = i;
   }
   mesh.instanceMatrix.needsUpdate = true;
   if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-  return { mesh, count: i, panelCount: shown.length };
+  return { mesh, count: i, panelCount: shown.length, steps };
 }
 
 export default function FacadeView({
   catalog, facade, massing, frame, theme = "light",
   showMassing = true, showFrame = true, heat = false, only = null, site = null,
+  animate = true,
 }) {
   const mountRef = useRef(null);
   const stateRef = useRef(null);
+  const animRef = useRef(null);
+  const fillRef = useRef(null);
+  const [phase, setPhase] = useState(null);
   const [count, setCount] = useState(null);
 
   useEffect(() => {
@@ -152,6 +179,30 @@ export default function FacadeView({
 
     let raf;
     const tick = () => {
+      // The facade grows BY PANEL TYPE -- every A, then every B, and so
+      // on -- because that is how the elevation is read: which rule put
+      // which panel where. Instances are already sorted into that order,
+      // so revealing is just moving InstancedMesh.count and costs
+      // nothing however many members are on screen.
+      const a = animRef.current;
+      if (a?.playing) {
+        const elapsed = performance.now() - a.t0;
+        const t = clamp01(elapsed / a.total);
+        a.mesh.count = Math.round(t * a.steps[a.steps.length - 1].end);
+        if (fillRef.current) fillRef.current.style.width = `${t * 100}%`;
+        let step = 0;
+        while (step < a.steps.length - 1 && a.mesh.count > a.steps[step].end) step += 1;
+        if (step !== a.lastStep) {
+          a.lastStep = step;
+          setPhase({ step, total: a.steps.length, ...a.steps[step] });
+        }
+        if (elapsed >= a.total) {
+          a.playing = false;
+          a.mesh.count = a.steps[a.steps.length - 1].end;
+          if (fillRef.current) fillRef.current.style.width = "100%";
+          setPhase(null);
+        }
+      }
       controls.update();
       renderer.render(scene, camera);
       raf = requestAnimationFrame(tick);
@@ -264,10 +315,25 @@ export default function FacadeView({
       group.add(fmesh);
     }
 
-    const { mesh, count: n, panelCount } = buildPanelInstances(
+    const { mesh, count: n, panelCount, steps } = buildPanelInstances(
       catalog, facade.panels ?? [], box, only, heat);
     group.add(mesh);
     setCount({ members: n, panels: panelCount });
+
+    // Long enough per type to read which panel it is, short enough that
+    // nine of them is not a wait: ~620ms each, floored so a single-type
+    // filter still animates rather than snapping.
+    const play = animate && steps.length > 0 && !prefersReducedMotion();
+    animRef.current = steps.length
+      ? {
+          mesh, steps,
+          total: Math.max(900, steps.length * 620),
+          t0: performance.now(), playing: play, lastStep: -1,
+        }
+      : null;
+    mesh.count = play ? 0 : n;
+    if (fillRef.current) fillRef.current.style.width = play ? "0%" : "100%";
+    if (!play) setPhase(null);
 
     if (!box.isEmpty()) {
       const centre = box.getCenter(new THREE.Vector3());
@@ -279,7 +345,7 @@ export default function FacadeView({
       camera.updateProjectionMatrix();
       controls.update();
     }
-  }, [catalog, facade, massing, frame, showMassing, showFrame, heat, only, theme, site]);
+  }, [catalog, facade, massing, frame, showMassing, showFrame, heat, only, theme, site, animate]);
 
   const legend = useMemo(() => {
     if (!catalog) return [];
@@ -290,16 +356,32 @@ export default function FacadeView({
     }));
   }, [catalog, facade]);
 
+  const replay = useCallback(() => {
+    const a = animRef.current;
+    if (!a) return;
+    a.t0 = performance.now();
+    a.lastStep = -1;
+    a.playing = true;
+    a.mesh.count = 0;
+    if (fillRef.current) fillRef.current.style.width = "0%";
+  }, []);
+
   return (
     <>
       <div className="viewport">
         <div ref={mountRef} className="canvas-mount" />
         <div className="hint">
           <span>Drag to orbit · scroll to zoom · right-drag to pan</span>
-          <span>
-            {count
-              ? `${count.panels} panels · ${count.members.toLocaleString()} members`
-              : "…"}
+          <span className="growth">
+            <span className="phase">
+              {phase
+                ? `${String(phase.step + 1).padStart(2, "0")}/${phase.total} · panel ${phase.type} · ${phase.panels} on the building`
+                : count
+                  ? `${count.panels} panels · ${count.members.toLocaleString()} members`
+                  : "…"}
+            </span>
+            <span className="track" aria-hidden="true"><span className="fill" ref={fillRef} /></span>
+            <button className="btn mini" onClick={replay} disabled={!facade}>Replay cladding</button>
           </span>
         </div>
       </div>
