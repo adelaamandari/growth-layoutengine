@@ -564,6 +564,18 @@ export default function App() {
                 unit into the lobby keeps its module and changes panel where the rooms
                 change.
               </p>
+              {facade.summary.open_length_m > 0 && (
+                <p className="note" style={{ marginTop: 8 }}>
+                  <b>{fmt(facade.summary.open_length_m, 1)} m</b> is left{" "}
+                  <b>open on purpose</b> — the deck-access corridors. An outdoor
+                  walkway wrapped in solid panels stops being a walkway, so the
+                  corridors take no cladding at all; cores and stairs still do,
+                  because a lift shaft and a fire escape are enclosed. This is
+                  counted separately from the shortfall below, not as wall the
+                  set failed to cover. It does mean an open deck currently has
+                  no guarding drawn — there is no balustrade in the nine.
+                </p>
+              )}
               <p className="note" style={{ marginTop: 8, fontSize: 11, color: "var(--ink-3)" }}>
                 The {fmt(facade.summary.unclad_length_m, 1)} m left over is two different
                 problems. <b>{fmt(facade.summary.remainder_length_m, 1)} m</b> is remainder

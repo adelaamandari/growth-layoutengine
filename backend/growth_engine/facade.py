@@ -159,6 +159,10 @@ class Facade:
     #                 clad. Needs a filler piece, or a run length that
     #                 divides by 330.
     unclad_cm: float = 0.0
+    #   open_cm       wall deliberately left open -- the deck-access
+    #                 corridors. Not a shortfall, and kept out of
+    #                 unclad_cm so the two are not confused.
+    open_cm: float = 0.0
     too_short_cm: float = 0.0
     remainder_cm: float = 0.0
     clad_cm: float = 0.0
@@ -185,6 +189,11 @@ def _outward(wall, element) -> Point:
     if (mx - cx) * n[0] + (my - cy) * n[1] < 0:
         n = (-n[0], -n[1])
     return Point(n[0], n[1])
+
+
+# Returned by _choose for a wall that is meant to stay open. Not a
+# panel key, and deliberately not None -- the caller has to notice it.
+OPEN = "-"
 
 
 def _choose(kind: str, level: int, run_rank: int, n: int, i: int) -> tuple[str, str]:
@@ -214,7 +223,20 @@ def _choose(kind: str, level: int, run_rank: int, n: int, i: int) -> tuple[str, 
                             longest elevation, so a lobby or a gym takes
                             its light on its best face.
     """
-    if kind in ("corridor", "core", "stairs"):
+    if kind == "corridor":
+        # OPEN. A deck-access corridor is outdoor circulation, and
+        # wrapping it in solid panels turns a walkway into a duct -- it
+        # was reading as a long blind box in the Facade view, which is
+        # what Adela flagged. Nothing is drawn here; the length is
+        # counted as `open_cm`, deliberately, not as cladding that
+        # failed.
+        #
+        # Cores and stairs are NOT open, which is why they no longer
+        # share this branch: a lift shaft and a fire escape are enclosed,
+        # and leaving them open would be the same mistake in reverse.
+        return OPEN, "corridor — open deck access, left unclad"
+
+    if kind in ("core", "stairs"):
         return "C", "circulation — no shading needed"
 
     if kind == "communal":
@@ -414,6 +436,7 @@ def build_facade(plan: FloorPlan, pitch_cm: float | None = None,
             here = by_level[level]
             spans = _merge([(t0, t1) for t0, t1, _w in here])
             placed = 0
+            open_bays = 0
 
             for k in range(n_line):
                 # The panel sits centred in its bay. In "run" mode the
@@ -454,6 +477,9 @@ def build_facade(plan: FloorPlan, pitch_cm: float | None = None,
 
                 panel, rule = _choose(el.kind, level, rank_of.get(wall.id, 0),
                                       n_line, k)
+                if panel is OPEN:
+                    open_bays += 1
+                    continue
                 out.panels.append(FacadePanel(
                     panel=panel,
                     cx=ln["ox"] + ln["ux"] * t,
@@ -473,9 +499,19 @@ def build_facade(plan: FloorPlan, pitch_cm: float | None = None,
             # grid mode those differ by 30cm and charging the spacing
             # would claim cladding on the column line.
             out.clad_cm += placed * panel_w
-            out.unclad_cm += level_len - placed * panel_w
+            # Left open ON PURPOSE, so it comes off the total before
+            # anything is called unclad. Charging it to unclad_cm would
+            # turn a design decision into a defect and put the deck
+            # corridors into the "needs a narrower panel" bucket, which
+            # is exactly the report anyone would act on.
+            open_len = min(open_bays * panel_w, level_len - placed * panel_w)
+            out.open_cm += open_len
+            short = level_len - placed * panel_w - open_len
+            out.unclad_cm += short
             if placed:
-                out.remainder_cm += level_len - placed * panel_w
+                out.remainder_cm += short
+            elif open_bays:
+                pass                      # the whole run is open by choice
             else:
                 out.too_short_cm += level_len
                 out.too_short_runs.append(
@@ -636,6 +672,9 @@ def facade_summary(facade: Facade) -> dict:
         "exterior_length_m": round(facade.exterior_cm / 100, 1),
         "clad_length_m": round(facade.clad_cm / 100, 1),
         "unclad_length_m": round(facade.unclad_cm / 100, 1),
+        # Deliberately open, and reported apart from the shortfall so a
+        # reader is not invited to "fix" it.
+        "open_length_m": round(facade.open_cm / 100, 1),
         "too_short_length_m": round(facade.too_short_cm / 100, 1),
         "too_short_count": len(facade.too_short_runs),
         # The widest run no panel fits, i.e. how narrow a new panel type
