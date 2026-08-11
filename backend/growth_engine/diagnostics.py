@@ -32,12 +32,18 @@ also why `wall_length` counts a duplex's perimeter once per floor.
 i.e. every shared stretch is present exactly once. It returns a report
 rather than raising, so the API can surface it (`/api/plan` does, on
 every response) and it can act as a regression guard. On the default
-program it holds to 0.00m: 688.01m naive, 160.25m shared, 527.76m
-resolved across 94 walls, 29 of them shared -- 1,583 m2 of wall.
+program at SEED 42 it holds to 0.00m: 690.55m naive, 156.73m shared,
+533.83m resolved -- 1,601.5 m2 of wall.
 
-(Those replace 550.33 / 171.29 / 378.99 across 59 walls. The resolved
-total rose because a duplex's upper storey now carries walls of its own,
-which is the material you build; it is not a regression.)
+The seed matters and belongs in the figure. Shared spaces draw their
+size from a range, so an unseeded plan gives a different total every
+run; the numbers this docstring used to quote (550.33 / 171.29 / 378.99)
+were from one such run and could never have been reproduced. What is
+checkable in any run is delta_m, which is 0.00 regardless.
+
+The resolved total is also higher than those old figures for a real
+reason: a duplex's upper storey now carries walls of its own, which is
+the material you build. Not a regression.
 """
 
 from __future__ import annotations
