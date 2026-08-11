@@ -542,11 +542,7 @@ def _grow_spine_once(program: list[str], site, seed: int | None = None,
                               reserved=courtyards,
                               max_branch_cm=max_branch_cm,
                               branch_depth=branch_depth,
-                              # A third of the way down the spine, so the
-                              # stair lands in the middle of what it
-                              # serves rather than at the far end of it.
-                              entry_run_cm=max(ENTRY_CORRIDOR_BAYS_CM,
-                                               length * 0.3))
+                              entry_run_cm=max(ENTRY_CORRIDOR_BAYS_CM, ENTRY_INSET_CM))
 
     # Residual -> green. Appending is safe: outdoor elements build no
     # walls, so the resolved wall set and every existing element's
@@ -982,6 +978,32 @@ def _simplify(pts: list[Point], tol: float) -> list[Point]:
 # The brief: green should be this share of the ground floor.
 GREEN_TARGET = (0.30, 0.40)
 
+# How far in from the entrance the first core sits, and so how long the
+# entry corridor is.
+#
+# This used to be `length * 0.3` -- a third of the spine edge, which on
+# the 109.8m Crossfield edge is 32.9m of corridor built before anything
+# else. Nothing ever hangs off it: _make_branches starts its three arms
+# at the CORE, so the entrance-to-core run is circulation with no units
+# on either side for its whole length. Adela flagged it on sight.
+#
+# It cannot simply be deleted, and that is worth recording because the
+# reason is not obvious. The three arms leave the core along -v, -u and
+# +u -- there is no arm back toward the street -- so wherever the core
+# lands is the street-side edge of the building. Put it two bays in and
+# the whole plan crowds one end of a 110m plot: ground area falls to
+# 902m2, the far tip is never reached, and the leftover shows up as
+# green at 80% of the ground floor. The long run was centring the
+# armature, not serving the door.
+#
+# 16m is where that stops paying. Swept at 3.4/8/12/16/20/26/32.9m over
+# 8 seeds, it gives more building (1139 vs 1055m2) and a shorter worst
+# walk to a stair (26.9 vs 29.8m) than the value it replaces, for half
+# the corridor. Measured, not derived: the response is noisy enough that
+# 18m tests worse than both its neighbours, so read this as the middle
+# of a broad flat optimum rather than a sharp one.
+ENTRY_INSET_CM = 1600.0
+
 
 def generate_spine_floorplan(program, site, seed=None, inset_m: float = 6.0,
                              entrance_edge: int = 1,
@@ -1019,10 +1041,14 @@ def generate_spine_floorplan(program, site, seed=None, inset_m: float = 6.0,
     ratio = courtyard_ratio
     best = None
     best_miss = None
+    # Layout seed, which usually stays put. See the pinned-lever comment
+    # below for the one case that moves it.
+    layout_seed = seed
+    pinned = False
 
-    for _ in range(max(1, attempts)):
+    for attempt in range(max(1, attempts)):
         plan = _grow_spine_once(
-            program, site, seed=seed, inset_m=inset_m,
+            program, site, seed=layout_seed, inset_m=inset_m,
             entrance_edge=entrance_edge, resolution_cm=resolution_cm,
             grid_family=grid_family, max_branch_cm=max_branch_cm,
             branch_depth=branch_depth, program_repeat=program_repeat,
@@ -1041,5 +1067,29 @@ def generate_spine_floorplan(program, site, seed=None, inset_m: float = 6.0,
         # being courtyards and start being the site.
         target = (lo + hi) / 2
         ratio = max(0.04, min(0.34, ratio + (target - share) * 0.45))
+
+        # Green above the band with the reserve already slammed to its
+        # floor means the lever is spent: the excess is NOT courtyard, it
+        # is ground the building never reached, and reserving less cannot
+        # give any of it back. Pulling harder just rebuilds the identical
+        # plan, and the loop burns its budget confirming its own answer.
+        # Seed 42 did exactly that -- 81% green, four times.
+        if share > hi and ratio <= 0.0401:
+            pinned = True
+
+        # So move the layout instead. WHERE the entrance falls along the
+        # frontage and which end the spine starts from is what swings
+        # green from 14% to 64% in the first place, and both are drawn
+        # from the seed. Perturbing it deterministically keeps the
+        # contract -- same inputs, same plan, every time -- while giving
+        # the loop a second thing to vary. Each remaining attempt gets
+        # its own layout at the default reserve, rather than one alternate
+        # layout and then two more passes at a floor already known to
+        # fail. On seed 42 that is 81.3% -> 42.2%, and 831 -> 1199m2 of
+        # building; still outside the band, and access_report still says
+        # so rather than pretending otherwise.
+        if pinned:
+            layout_seed = (seed or 0) + (attempt + 1) * 7919
+            ratio = courtyard_ratio
 
     return best
