@@ -40,6 +40,18 @@ COLLINEAR_TOL_CM = 2.0
 MIN_SHARED_CM = 5.0
 
 
+def _storeys(el: PlacedElement) -> range:
+    """Every storey this element occupies.
+
+    Derived here rather than imported, for the same reason this module
+    computes its own overlaps: the check has to be able to disagree with
+    the resolution logic. A duplex is one element standing on two
+    storeys, and counting it once was what let 177m of doubled wall pass
+    as deduplicated.
+    """
+    return range(el.level, el.level + max(1, getattr(el, "floors", 1)))
+
+
 def element_edges(el: PlacedElement) -> list[tuple[Point, Point]]:
     c = el.corners
     return [(c[i], c[(i + 1) % 4]) for i in range(4)]
@@ -97,7 +109,12 @@ def shared_boundaries(elements: list[PlacedElement]) -> tuple[float, list[dict]]
     total = 0.0
     for i, e1 in enumerate(walled):
         for e2 in walled[i + 1:]:
-            if getattr(e1, "level", 0) != getattr(e2, "level", 0):
+            # Every storey they BOTH stand on. Testing e1.level == e2.level
+            # instead misses the case that matters: a duplex on levels 0-1
+            # against an ordinary unit on level 1 shares a real wall on
+            # level 1, and comparing base levels says they never meet.
+            shared_levels = (set(_storeys(e1)) & set(_storeys(e2)))
+            if not shared_levels:
                 continue
             for ea in element_edges(e1):
                 for eb in element_edges(e2):
@@ -105,13 +122,17 @@ def shared_boundaries(elements: list[PlacedElement]) -> tuple[float, list[dict]]
                     if hit is None:
                         continue
                     length, p1, p2 = hit
-                    total += length
-                    segments.append({
-                        "a": e1.label, "b": e2.label,
-                        "length_cm": round(length, 1),
-                        "p": [round(p1.x, 2), round(p1.y, 2),
-                              round(p2.x, 2), round(p2.y, 2)],
-                    })
+                    # Once per storey they share: two duplexes side by
+                    # side build that party wall on both their floors, and
+                    # both copies have to be accounted for.
+                    for lv in sorted(shared_levels):
+                        total += length
+                        segments.append({
+                            "a": e1.label, "b": e2.label, "level": lv,
+                            "length_cm": round(length, 1),
+                            "p": [round(p1.x, 2), round(p1.y, 2),
+                                  round(p2.x, 2), round(p2.y, 2)],
+                        })
     return total, segments
 
 
@@ -128,8 +149,14 @@ def wall_length(elements: list[PlacedElement]) -> float:
     for el in elements:
         if not builds_walls(el):
             continue
+        # Multiplied by the storeys it occupies. A duplex's perimeter is
+        # built on both its floors, and charging it once made the naive
+        # figure disagree with a resolved set that (correctly) builds it
+        # twice -- so the invariant could only hold by both sides making
+        # the same mistake.
+        storeys = len(_storeys(el))
         for a, b in element_edges(el):
-            total += ((b.x - a.x) ** 2 + (b.y - a.y) ** 2) ** 0.5
+            total += ((b.x - a.x) ** 2 + (b.y - a.y) ** 2) ** 0.5 * storeys
     return total
 
 
@@ -153,8 +180,18 @@ def verify_walls(plan, tol_cm: float = 1.0) -> dict:
         referenced |= set(el.wall_ids)
     all_ids = {w.id for w in plan.walls}
 
+    # Length is now a per-storey figure, so area follows from it directly
+    # -- every resolved wall is exactly one storey tall. Reported because
+    # a take-off is priced in m2, and because it is the number that would
+    # have made the duplex problem visible: before this, two walls of
+    # identical plan length could stand 300 and 600 tall and the report
+    # had no way to say so.
+    from .growth import LEVEL_HEIGHT_CM
+
     return {
         "naive_length_m": round(naive / 100, 2),
+        "resolved_area_m2": round(resolved * LEVEL_HEIGHT_CM / 10000, 1),
+        "storey_height_m": LEVEL_HEIGHT_CM / 100,
         "shared_length_m": round(shared_len / 100, 2),
         "resolved_length_m": round(resolved / 100, 2),
         "expected_length_m": round(expected / 100, 2),

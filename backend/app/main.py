@@ -255,7 +255,7 @@ def plan(req: PlanRequest) -> PlanResponse:
             length_cm=round(w.length_cm, 2),
             # Walls are resolved per storey, so every owner of a wall is
             # on the same level by construction.
-            level=fp.elements[w.owners[0]].level if w.owners else 0,
+            level=w.level,
             segments=[SegmentOut(c=s.component,
                                  p=[round(s.start.x, 2), round(s.start.y, 2),
                                     round(s.end.x, 2), round(s.end.y, 2)])

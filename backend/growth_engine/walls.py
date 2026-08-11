@@ -63,6 +63,11 @@ class Wall:
     end: Point
     owners: tuple[int, ...]              # indices into FloorPlan.elements
     segments: tuple[WallSegment, ...]    # the component walk, done once
+    # The storey this wall stands on. Walls resolve one storey at a time,
+    # so this is a property of the WALL, not something to be read back off
+    # an owner: a duplex owns walls on both the storeys it occupies, and
+    # asking owners[0] which level it is on cannot distinguish them.
+    level: int = 0
 
     @property
     def shared(self) -> bool:

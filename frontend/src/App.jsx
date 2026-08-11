@@ -357,6 +357,12 @@ export default function App() {
               <div className="stat"><dt>Outdoor</dt><dd>{fmt(s.outdoor_area_m2)}<span className="u">m² open</span></dd></div>
             )}
             <div className="stat"><dt>Wall built</dt><dd>{s ? fmt(s.wall_length_m) : "—"}<span className="u">m</span></dd></div>
+            {/* Area, not just length. Both walls of a duplex run the same
+                metres in plan and twice the material, and a take-off is
+                priced in m2 -- the length alone could not tell them apart. */}
+            {plan?.wall_check?.resolved_area_m2 > 0 && (
+              <div className="stat"><dt>Wall area</dt><dd>{fmt(plan.wall_check.resolved_area_m2)}<span className="u">m²</span></dd></div>
+            )}
             <div className="stat"><dt>Shared</dt><dd>{s ? fmt(s.shared_wall_count) : "—"}<span className="u">of {s ? fmt(s.wall_count) : "—"}</span></dd></div>
           </dl>
 

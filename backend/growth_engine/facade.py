@@ -400,18 +400,15 @@ def build_facade(plan: FloorPlan, pitch_cm: float | None = None,
         # 66 on level 1, 7 on level 2 and none on level 3: a facade that
         # stopped two floors below the highest room.
         #
-        # A wall is claddable on a storey if ANY of its owners is there.
-        # Shared walls have several owners and they need not be the same
-        # height -- a duplex against a single-storey corridor is clad for
-        # both its floors, which is what you would build.
+        # Straight off wall.level now. This used to expand each wall
+        # across its owners' storeys, because walls were grouped by base
+        # level and a duplex's upper floor had none of its own -- the
+        # facade stopped two storeys below the highest room. That gap is
+        # closed at the source: walls resolve per occupied storey, so a
+        # duplex has a real level-1 wall to clad.
         by_level: dict[int, list] = {}
         for t0, t1, wall in items:
-            for owner in wall.owners:
-                oel = plan.elements[owner]
-                for lv in range(oel.level, oel.level + oel.floors):
-                    bucket = by_level.setdefault(lv, [])
-                    if not any(w is wall for _a, _b, w in bucket):
-                        bucket.append((t0, t1, wall))
+            by_level.setdefault(wall.level, []).append((t0, t1, wall))
 
         for level in sorted(by_level):
             here = by_level[level]
@@ -440,14 +437,7 @@ def build_facade(plan: FloorPlan, pitch_cm: float | None = None,
                 if hit is None:
                     hit = min(here, key=lambda it: min(abs(t - it[0]), abs(t - it[1])))
                 wall = hit[2]
-                # The owner standing on THIS storey. Picking owners[0]
-                # blindly would take the level from whichever element the
-                # wall happened to list first, which on a shared wall is
-                # not necessarily one that reaches this high.
-                el = next((plan.elements[o] for o in wall.owners
-                           if plan.elements[o].level <= level
-                           < plan.elements[o].level + plan.elements[o].floors),
-                          plan.elements[wall.owners[0]])
+                el = plan.elements[wall.owners[0]]
 
                 normal = _outward(wall, el)
                 # Rotation about +z that carries the panel's local axes

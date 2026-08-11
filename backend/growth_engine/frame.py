@@ -850,16 +850,21 @@ def build_frame(plan: FloorPlan, joint_blocks: bool = False,
     per_storey = _courses_per_storey(course_cm)
 
     def _wall_span(wall) -> tuple[float, float]:
-        """(base_z, top_z) of a wall, from the elements that own it.
-        Elements on level 1 sit a storey up, so a wall's base is not
-        always the ground -- reading only height_cm would build every
-        upper-floor wall down through the building."""
-        owners = [plan.elements[i] for i in wall.owners]
-        if not owners:
-            return 0.0, STOREY_CM
-        base = min(getattr(el, "z0", 0.0) for el in owners)
-        top = max(getattr(el, "z0", 0.0) + el.height_cm for el in owners)
-        return base, top
+        """(base_z, top_z) of a wall.
+
+        Walls resolve one storey at a time, so the span is that storey --
+        a duplex arrives as two stacked walls rather than one 600cm one,
+        which is the same timber either way and lets it share its level-1
+        wall with the level-1 unit next door.
+
+        Exactly one storey, with no reference to the owners at all. Every
+        element that builds walls is a whole number of storeys tall, so
+        there is no part-height case to guard against, and reading a
+        height back off owners[0] is what used to make a duplex's wall
+        600cm and unshareable with the unit beside it on level 1.
+        """
+        base = getattr(wall, "level", 0) * STOREY_CM
+        return base, base + STOREY_CM
 
     # Partition members already placed, as (x, y, z, length, angle).
     # A double-height room reaches into the storey above it, so its

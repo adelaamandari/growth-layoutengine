@@ -493,9 +493,20 @@ def _resolve_walls_per_level(elements: list[PlacedElement]):
     Resolving every element together would be wrong now that the plan
     stacks: a level-1 corridor sits exactly above the level-0 one, and
     `resolve_walls` works in plan, so it would merge two real walls into
-    one and halve the take-off. Elements are grouped by their OWN level
-    -- a duplex belongs to the level it stands on, and its walls are
-    simply 600cm tall.
+    one and halve the take-off.
+
+    An element is grouped into EVERY storey it occupies, not just the one
+    it stands on. Grouping a duplex by its base level alone -- on the
+    reasoning that its walls are simply 600cm tall -- quietly reintroduced
+    the duplication this function exists to prevent: a duplex spanning
+    levels 0-1 and an ordinary unit on level 1 share a plan line, but they
+    never met in the same resolve group, so each built its own copy of it.
+    177m of wall on the default plan, built twice.
+
+    It passed verification because diagnostics.shared_boundaries skipped
+    the same pairs, by the same el.level test. Two independent modules
+    agreeing is only evidence when they do not share the assumption -- and
+    that one they did. Both now work per occupied storey.
 
     Outdoor areas are skipped: they have no perimeter to build, and
     handing their edges to resolve_walls would put a timber wall around
@@ -509,7 +520,8 @@ def _resolve_walls_per_level(elements: list[PlacedElement]):
     for i, el in enumerate(elements):
         if not builds_walls(el):
             continue
-        by_level.setdefault(el.level, []).append(i)
+        for lv in range(el.level, el.level + max(1, el.floors)):
+            by_level.setdefault(lv, []).append(i)
 
     walls: list[Wall] = []
     dropped_cm = 0.0
@@ -522,6 +534,7 @@ def _resolve_walls_per_level(elements: list[PlacedElement]):
                 id=len(walls), start=w.start, end=w.end,
                 owners=tuple(idxs[o] for o in w.owners),
                 segments=w.segments,
+                level=level,
             ))
         dropped_cm += res.dropped_cm
         dropped_count += res.dropped_count
