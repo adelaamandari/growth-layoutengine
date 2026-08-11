@@ -102,3 +102,21 @@ export function siteOutline(THREE, boundaryCm, color, opacity = 1) {
     new THREE.LineBasicMaterial({ color, transparent: true, opacity })
   );
 }
+
+/**
+ * Add the plot to a scene group: the developable boundary solid, the
+ * street centrelines faint behind it. Every 3D view draws it the same
+ * way, from one place, so they cannot drift apart.
+ *
+ * `box`, if given, is expanded to include the site so the camera frames
+ * the plot rather than only the building standing on it.
+ */
+export function addSiteOutline(THREE, group, site, box) {
+  if (!site) return;
+  const green = 0x7d8a6a;
+  const outer = siteOutline(THREE, site.centreline_cm, green, 0.35);
+  const inner = siteOutline(THREE, site.boundary_cm, green, 0.9);
+  group.add(outer);
+  group.add(inner);
+  if (box) box.expandByObject(outer);
+}

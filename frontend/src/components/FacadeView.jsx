@@ -3,7 +3,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { CM_TO_M, buildFrameInstances } from "./frameInstances";
 import { KIND_COLOR, KIND_FALLBACK, applySceneTheme, sceneTheme } from "../theme";
-import { prismGeometry } from "./prism";
+import { addSiteOutline, prismGeometry } from "./prism";
 
 // Heatmap ramp for sun received: cool blue (least) through to a warm
 // yellow (most). Sequential and monotonic in lightness, so it still
@@ -115,7 +115,7 @@ function buildPanelInstances(catalog, panels, box, only, heat) {
 
 export default function FacadeView({
   catalog, facade, massing, frame, theme = "light",
-  showMassing = true, showFrame = true, heat = false, only = null,
+  showMassing = true, showFrame = true, heat = false, only = null, site = null,
 }) {
   const mountRef = useRef(null);
   const stateRef = useRef(null);
@@ -208,6 +208,9 @@ export default function FacadeView({
 
     const box = new THREE.Box3();
 
+    // The plot this stands on.
+    addSiteOutline(THREE, group, site, box);
+
     // The massing behind the panels, faint. Without it the facade floats
     // as a set of loose screens and you cannot tell what it is cladding;
     // with it the panels read as the outside of a building.
@@ -276,7 +279,7 @@ export default function FacadeView({
       camera.updateProjectionMatrix();
       controls.update();
     }
-  }, [catalog, facade, massing, frame, showMassing, showFrame, heat, only, theme]);
+  }, [catalog, facade, massing, frame, showMassing, showFrame, heat, only, theme, site]);
 
   const legend = useMemo(() => {
     if (!catalog) return [];

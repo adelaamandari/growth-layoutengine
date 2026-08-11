@@ -482,9 +482,9 @@ export default function App() {
           {tab !== "plan" && (
             <Suspense fallback={<div className="viewport" style={{ padding: 20 }}><span className="muted">Loading 3D view…</span></div>}>
               {tab === "massing" && <MassingView massing={massing} animate={animateGrowth} theme={theme} site={site} />}
-              {tab === "frame" && <FrameView frame={shownFrame} animate={animateGrowth} theme={theme} />}
+              {tab === "frame" && <FrameView frame={shownFrame} animate={animateGrowth} theme={theme} site={site} />}
               {tab === "build" && (
-                <BuildView massing={massing} frame={shownBuildFrame} animate={animateGrowth} theme={theme} />
+                <BuildView massing={massing} frame={shownBuildFrame} animate={animateGrowth} theme={theme} site={site} />
               )}
               {tab === "facade" && (
                 facadeCatalog?.error ? (
@@ -496,7 +496,7 @@ export default function App() {
                     catalog={facadeCatalog} facade={facade} massing={massing}
                     frame={frame} theme={theme}
                     showMassing={showMassing} showFrame={showFrameBehind}
-                    heat={heatmap} only={onlyPanel || null}
+                    heat={heatmap} only={onlyPanel || null} site={site}
                   />
                 )
               )}

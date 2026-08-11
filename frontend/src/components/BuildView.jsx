@@ -12,7 +12,7 @@ import {
   prefersReducedMotion,
 } from "./frameInstances";
 import { KIND_COLOR, KIND_FALLBACK, applySceneTheme, sceneTheme } from "../theme";
-import { prismGeometry } from "./prism";
+import { addSiteOutline, prismGeometry } from "./prism";
 
 // The whole point of this view: the massing volume arrives FIRST, then
 // the real timber components colonise it. Both are drawn in one scene
@@ -70,7 +70,7 @@ function applyGhost(item, g) {
   item.edges.material.opacity = 0.35 - 0.07 * g;
 }
 
-export default function BuildView({ massing, frame, animate = true, theme = "light" }) {
+export default function BuildView({ massing, frame, animate = true, theme = "light", site = null }) {
   const mountRef = useRef(null);
   const stateRef = useRef(null);
   const animRef = useRef(null);
@@ -181,6 +181,9 @@ export default function BuildView({ massing, frame, animate = true, theme = "lig
     }
 
     const box = new THREE.Box3();
+
+    // The plot this stands on.
+    addSiteOutline(THREE, group, site, box);
     const edgeColor = sceneTheme(theme).edge;
 
     // --- the volume ---------------------------------------------------
@@ -271,7 +274,7 @@ export default function BuildView({ massing, frame, animate = true, theme = "lig
       camera.updateProjectionMatrix();
       controls.update();
     }
-  }, [massing, frame, animate]);
+  }, [massing, frame, animate, site]);
 
   const replay = useCallback(() => {
     const a = animRef.current;

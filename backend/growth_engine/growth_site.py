@@ -390,14 +390,14 @@ def generate_site_floorplan(program: list[str], site, seed: int | None = None,
     )
 
 
-def generate_spine_floorplan(program: list[str], site, seed: int | None = None,
+def _grow_spine_once(program: list[str], site, seed: int | None = None,
                              inset_m: float = 6.0, entrance_edge: int = 1,
                              resolution_cm: float = 90.0,
                              grid_family: int | None = None,
                              max_branch_cm: float = 4000.0,
                              branch_depth: int = 2,
                              program_repeat: int = 1,
-                             core_pitch_cm: float = 800.0,
+                             core_pitch_cm: float = 1600.0,
                              courtyard_ratio: float = 0.16,
                              street_names=None) -> FloorPlan:
     """
@@ -557,13 +557,20 @@ def generate_spine_floorplan(program: list[str], site, seed: int | None = None,
         for lv in range(el.level, el.level + el.floors):
             occupied.setdefault(lv, []).append(el.corners)
 
-    # The courtyards were reserved so growth would build around them;
-    # they still have to be DRAWN. Reserving alone put them in
-    # `occupied`, which meant the residual pass saw their ground as taken
-    # and skipped it -- the courts existed as holes in the plan and as
-    # nothing at all in the green total.
-    for k, block in enumerate(courtyards):
-        key = outdoor_keys[k % len(outdoor_keys)]
+    # Courtyards ARE emitted, and they are what makes the green total
+    # predictable. Leaving them to the residual pass looked cleaner and
+    # was not: only about a fifth of free ground survives that pass --
+    # convex, at least 60m2, at least 5m wide -- so green swung between
+    # 7% and 53% depending on how awkwardly the leftovers fell. A
+    # reserved court is green by construction.
+    #
+    # The label counter is SHARED with the residual pass, so Garden and
+    # Playground alternate across courts and traced pieces alike instead
+    # of one label collecting all the courts.
+    order = 0
+    for block in courtyards:
+        key = outdoor_keys[order % len(outdoor_keys)]
+        order += 1
         plan.elements.append(PlacedElement("outdoor", key, block,
                                            height_cm=OUTDOOR_HEIGHT_CM,
                                            level=0))
@@ -571,7 +578,7 @@ def generate_spine_floorplan(program: list[str], site, seed: int | None = None,
         occupied.setdefault(0, []).append(block)
 
     _fill_residual(plan.elements, occupied, ctx, outdoor_keys,
-                   plan.unit_counts, resolution_cm)
+                   plan.unit_counts, resolution_cm, start_order=order)
     _assign_growth_steps(plan.elements)
     plan.off_site = [f"{el.label} (L{el.level})" for el in plan.elements
                      if not polygon_contains(el.corners, ctx.boundary)]
@@ -579,7 +586,7 @@ def generate_spine_floorplan(program: list[str], site, seed: int | None = None,
 
 
 def _fill_residual(elements, occupied, ctx: SiteContext, keys, counts,
-                   resolution_cm: float) -> None:
+                   resolution_cm: float, start_order: int = 0) -> None:
     """
     Whatever the building did not take becomes green.
 
@@ -626,7 +633,7 @@ def _fill_residual(elements, occupied, ctx: SiteContext, keys, counts,
     ox = p0.x - (i0 + 0.5) * resolution_cm
     oy = p0.y - (j0 + 0.5) * resolution_cm
 
-    order = 0
+    order = start_order
     for region in _regions(free):
         # ONE REGION, SEVERAL CLEAN PIECES.
         #
@@ -737,12 +744,21 @@ def _courtyards(ctx: SiteContext, u: Point, v: Point, entrance: Point,
         for across in (-1.0, 1.0):
             c = Point(entrance.x - v.x * along + u.x * across * side * 1.15,
                       entrance.y - v.y * along + u.y * across * side * 1.15)
+            # A TRAPEZOID, not a square. The two ends are drawn at
+            # different widths, so a reserved court reads as a shaped
+            # piece of ground rather than a stamped tile -- and, because
+            # the labels are handed out from one counter shared with the
+            # residual pass, Playground gets these as often as Garden
+            # does. Emitting identical squares was what made Playground a
+            # permanently rectangular label.
             half = side / 2
+            near = half * random.uniform(0.62, 1.0)
+            far = half * random.uniform(0.62, 1.0)
             block = [
-                Point(c.x - u.x * half - v.x * half, c.y - u.y * half - v.y * half),
-                Point(c.x + u.x * half - v.x * half, c.y + u.y * half - v.y * half),
-                Point(c.x + u.x * half + v.x * half, c.y + u.y * half + v.y * half),
-                Point(c.x - u.x * half + v.x * half, c.y - u.y * half + v.y * half),
+                Point(c.x - u.x * near - v.x * half, c.y - u.y * near - v.y * half),
+                Point(c.x + u.x * near - v.x * half, c.y + u.y * near - v.y * half),
+                Point(c.x + u.x * far + v.x * half, c.y + u.y * far + v.y * half),
+                Point(c.x - u.x * far + v.x * half, c.y - u.y * far + v.y * half),
             ]
             if polygon_contains(block, ctx.boundary):
                 out.append(block)
@@ -752,7 +768,7 @@ def _courtyards(ctx: SiteContext, u: Point, v: Point, entrance: Point,
 
 
 def _convex_pieces(region: set, ox: float, oy: float, res: float,
-                   boundary, max_pieces: int = 6) -> list[list[Point]]:
+                   boundary, max_pieces: int = 9) -> list[list[Point]]:
     """Cover a region with a few clean convex shapes.
 
     Greedy: take the best convex shape that fits, remove the cells it
@@ -961,3 +977,69 @@ def _simplify(pts: list[Point], tol: float) -> list[Point]:
     half = len(pts) // 2
     out = _rdp(pts[:half + 1])[:-1] + _rdp(pts[half:] + [pts[0]])[:-1]
     return out if len(out) >= 3 else pts
+
+
+# The brief: green should be this share of the ground floor.
+GREEN_TARGET = (0.30, 0.40)
+
+
+def generate_spine_floorplan(program, site, seed=None, inset_m: float = 6.0,
+                             entrance_edge: int = 1,
+                             resolution_cm: float = 90.0,
+                             grid_family: int | None = None,
+                             max_branch_cm: float = 4000.0,
+                             branch_depth: int = 2,
+                             program_repeat: int = 1,
+                             core_pitch_cm: float = 1600.0,
+                             courtyard_ratio: float = 0.16,
+                             street_names=None,
+                             attempts: int = 4) -> FloorPlan:
+    """
+    Grow a spine plan whose green lands in the brief's 30-40% band.
+
+    Green is what is LEFT of the ground once the building has taken what
+    it needs, and leftovers are chaotic: on one sweep the same settings
+    gave anything from 14% to 64% depending only on where the entrance
+    fell. No single courtyard_ratio fixes that, because the ratio is an
+    input and the green share is an outcome.
+
+    So it is closed as a loop instead. Grow, measure, adjust the reserved
+    courtyard area toward the miss, and grow again -- a few passes, then
+    keep the best attempt whether or not it landed. Bounded and cheap
+    (each pass is a couple of seconds), and it turns a target that was
+    being reported into one that is usually met.
+
+    The result is still REPORTED rather than promised: diagnostics
+    .access_report gives the achieved share, and a plan that could not
+    reach the band says so instead of pretending.
+    """
+    from .diagnostics import access_report
+
+    lo, hi = GREEN_TARGET
+    ratio = courtyard_ratio
+    best = None
+    best_miss = None
+
+    for _ in range(max(1, attempts)):
+        plan = _grow_spine_once(
+            program, site, seed=seed, inset_m=inset_m,
+            entrance_edge=entrance_edge, resolution_cm=resolution_cm,
+            grid_family=grid_family, max_branch_cm=max_branch_cm,
+            branch_depth=branch_depth, program_repeat=program_repeat,
+            core_pitch_cm=core_pitch_cm, courtyard_ratio=ratio,
+            street_names=street_names)
+        share = access_report(plan)["green_pct_of_ground"] / 100.0
+
+        miss = 0.0 if lo <= share <= hi else min(abs(share - lo), abs(share - hi))
+        if best_miss is None or miss < best_miss:
+            best, best_miss = plan, miss
+        if miss == 0.0:
+            return plan
+
+        # Reserved ground is the lever: short on green, reserve more.
+        # Clamped because past about a third of the plot the courts stop
+        # being courtyards and start being the site.
+        target = (lo + hi) / 2
+        ratio = max(0.04, min(0.34, ratio + (target - share) * 0.45))
+
+    return best

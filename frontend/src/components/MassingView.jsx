@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { KIND_COLOR, KIND_FALLBACK, applySceneTheme, sceneTheme } from "../theme";
-import { prismGeometry, siteOutline } from "./prism";
+import { addSiteOutline, prismGeometry } from "./prism";
 
 // The engine works in centimetres; three.js is happier around unit
 // scale, so everything is divided by 100 on the way into the scene.
@@ -175,14 +175,7 @@ export default function MassingView({ massing, animate = true, theme = "light", 
     // building actually has to sit inside, and the street centrelines
     // faint behind it -- so the massing can be read against the plot it
     // stands on rather than floating in an empty grid.
-    if (site) {
-      const green = 0x7d8a6a;
-      const outer = siteOutline(THREE, site.centreline_cm, green, 0.35);
-      const inner = siteOutline(THREE, site.boundary_cm, green, 0.9);
-      group.add(outer);
-      group.add(inner);
-      box.expandByObject(outer);
-    }
+    addSiteOutline(THREE, group, site, box);
 
     const items = [];
     // growth_step, not array order: a branch corridor is appended after

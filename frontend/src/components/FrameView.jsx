@@ -10,8 +10,9 @@ import {
   prefersReducedMotion,
 } from "./frameInstances";
 import { applySceneTheme } from "../theme";
+import { addSiteOutline } from "./prism";
 
-export default function FrameView({ frame, animate = true, theme = "light" }) {
+export default function FrameView({ frame, animate = true, theme = "light", site = null }) {
   const mountRef = useRef(null);
   const stateRef = useRef(null);
   const animRef = useRef(null);
@@ -132,6 +133,9 @@ export default function FrameView({ frame, animate = true, theme = "light" }) {
     if (!members.length) return;
 
     const box = new THREE.Box3();
+
+    // The plot this stands on.
+    addSiteOutline(THREE, group, site, box);
     const { mesh, items } = buildFrameInstances(members, box);
     group.add(mesh);
 
@@ -160,7 +164,7 @@ export default function FrameView({ frame, animate = true, theme = "light" }) {
       camera.updateProjectionMatrix();
       controls.update();
     }
-  }, [frame, animate]);
+  }, [frame, animate, site]);
 
   const replay = useCallback(() => {
     const a = animRef.current;
