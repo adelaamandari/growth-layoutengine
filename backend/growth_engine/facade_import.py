@@ -198,76 +198,12 @@ def extract(folder: str | Path) -> dict:
     }
 
 
-# --- J: guarding for the open decks ------------------------------------
-#
-# DERIVED, NOT SURVEYED. Every other panel here came out of a GLB Adela
-# modelled; this one I generated, and it is kept obviously separate so
-# nobody later reads it as catalog geometry. Replace it the moment there
-# is a real part.
-#
-# It exists because the deck-access corridors are now left open (see
-# facade._choose), and an open walkway three storeys up needs guarding.
-# That is not a handrail: a handrail is the graspable rail, guarding is
-# the barrier that stops the fall, and it needs infill.
-#
-# 110cm high with 6.5cm gaps between 10cm slats. UK Approved Document K
-# puts external balcony guarding at 1100mm and says a 100mm sphere must
-# not pass -- CHECK BOTH against the current edition before this is
-# built from, they are here to make the geometry plausible, not to
-# certify it.
-#
-# 20 slats at 16.5cm centres divides 330 exactly, so the gap ACROSS a
-# joint between two panels is the same 6.5cm as the gaps within one.
-# Getting that wrong is how a compliant panel makes a non-compliant
-# balustrade.
-GUARD_KEY = "J"
-GUARD_HEIGHT_CM = 110.0
-_GUARD_SLAT_W = 10.0
-_GUARD_SLATS = 20
-
-
-def derived_guard_panel(width_cm: float = 330.0) -> dict:
-    """A simple slatted guard rail, generated rather than surveyed."""
-    pitch = width_cm / _GUARD_SLATS
-    rail_h = 10.0
-    infill_h = GUARD_HEIGHT_CM - rail_h
-    members = []
-    for k in range(_GUARD_SLATS):
-        x = -width_cm / 2 + pitch * (k + 0.5)
-        members.append({"c": [round(x, 2), 0.0, round(infill_h / 2, 2)],
-                        "s": [_GUARD_SLAT_W, 10.0, infill_h]})
-    # The top rail, which is also the handrail.
-    members.append({"c": [0.0, 0.0, GUARD_HEIGHT_CM - rail_h / 2],
-                    "s": [width_cm, 20.0, rail_h]})
-    return {
-        "width_cm": width_cm,
-        "height_cm": GUARD_HEIGHT_CM,
-        "depth_cm": 20.0,
-        "projection_cm": 0.0,
-        "z0": 0.0, "z1": GUARD_HEIGHT_CM,
-        # Deliberately its own height, not 0..300. It carries no column
-        # and does not stack, and saying otherwise would make
-        # verify_facade's alignment check agree with a fiction.
-        "column_z0": 0.0, "column_z1": GUARD_HEIGHT_CM,
-        "y_out_cm": 10.0, "y_in_cm": 10.0,
-        "members": members,
-        "source": "derived — not surveyed, see facade_import.derived_guard_panel",
-    }
-
-
 def load_facades(path: str | Path = CATALOG_PATH) -> dict | None:
-    """Load the bundled extraction, or None if it has not been generated.
-
-    The derived guard panel is added here rather than written into
-    facades.json, so re-running the extraction from the GLBs never has to
-    remember to put it back."""
+    """Load the bundled extraction, or None if it has not been generated."""
     path = Path(path)
     if not path.exists():
         return None
-    data = json.loads(path.read_text())
-    data["panels"].setdefault(
-        GUARD_KEY, derived_guard_panel(data.get("panel_width_cm", 330.0)))
-    return data
+    return json.loads(path.read_text())
 
 
 def main(argv: list[str] | None = None) -> int:

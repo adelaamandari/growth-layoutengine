@@ -191,7 +191,9 @@ def _outward(wall, element) -> Point:
     return Point(n[0], n[1])
 
 
-from .facade_import import GUARD_KEY
+# Returned by _choose for a wall that is meant to stay open. Not a
+# panel key, and deliberately not None -- the caller has to notice it.
+OPEN = "-"
 
 
 def _choose(kind: str, level: int, run_rank: int, n: int, i: int) -> tuple[str, str]:
@@ -232,7 +234,7 @@ def _choose(kind: str, level: int, run_rank: int, n: int, i: int) -> tuple[str, 
         # Cores and stairs are NOT open, which is why they no longer
         # share this branch: a lift shaft and a fire escape are enclosed,
         # and leaving them open would be the same mistake in reverse.
-        return GUARD_KEY, "corridor — open deck, guarding only"
+        return OPEN, "corridor — open deck access, left unclad"
 
     if kind in ("core", "stairs"):
         return "C", "circulation — no shading needed"
@@ -475,6 +477,9 @@ def build_facade(plan: FloorPlan, pitch_cm: float | None = None,
 
                 panel, rule = _choose(el.kind, level, rank_of.get(wall.id, 0),
                                       n_line, k)
+                if panel is OPEN:
+                    open_bays += 1
+                    continue
                 out.panels.append(FacadePanel(
                     panel=panel,
                     cx=ln["ox"] + ln["ux"] * t,
@@ -487,15 +492,7 @@ def build_facade(plan: FloorPlan, pitch_cm: float | None = None,
                     rule=rule,
                     nx=normal.x, ny=normal.y,
                 ))
-                # A guard rail is not cladding. It draws, but the wall
-                # behind it is still open air, so its length belongs in
-                # open_cm -- counting it as clad would claim an enclosure
-                # that is not there, and would quietly put the deck
-                # corridors back into the clad percentage.
-                if panel == GUARD_KEY:
-                    open_bays += 1
-                else:
-                    placed += 1
+                placed += 1
 
             level_len = sum(s1 - s0 for s0, s1 in spans)
             # A panel covers its own width, never the bay spacing -- in
@@ -555,30 +552,16 @@ def verify_facade(facade: Facade, pitch_cm: float | None = None,
         step_cm = pitch_cm
     panels_meta = cat.get("panels", {})
 
-    # The guard rail is exempt, and it has to be. This test asks whether
-    # a panel's column runs the full storey so the panel above lands on
-    # it -- which is the right question for CLADDING and a meaningless
-    # one for guarding. J is 110cm of balustrade on an open deck; it
-    # carries no column, nothing stacks on it, and it is not trying to.
-    # Without this it fails the check by design and takes `connected`
-    # down with it, which would make the one number that says the facade
-    # is sound permanently read False.
     bad_column = sorted({
         k for k, p in panels_meta.items()
-        if k != GUARD_KEY
-        and (abs(p.get("column_z0", 0.0)) > 0.5
-             or abs(p.get("column_z1", 0.0) - LEVEL_HEIGHT_CM) > 0.5)
+        if abs(p.get("column_z0", 0.0)) > 0.5
+        or abs(p.get("column_z1", 0.0) - LEVEL_HEIGHT_CM) > 0.5
     })
 
     # Vertical: group by (wall line position, level) and look for a panel
     # one storey up at the same plan position.
-    # Guarding is excluded from the VERTICAL test for the same reason:
-    # a balustrade on level 1 is not meant to meet one on level 2, there
-    # is 190cm of open air between them on purpose.
     at = {}
     for p in facade.panels:
-        if p.panel == GUARD_KEY:
-            continue
         at[(round(p.cx, 1), round(p.cy, 1), p.level)] = p
     stacked = gaps = 0
     for (x, y, lv), _p in at.items():
@@ -600,10 +583,6 @@ def verify_facade(facade: Facade, pitch_cm: float | None = None,
     # keying on that alone compares panels that were never neighbours and
     # reports a phantom gap between them. The line is fixed by the angle
     # plus the distance along the normal.
-    #
-    # Guarding IS included here, unlike above: a gap between two lengths
-    # of balustrade is a hole in the guarding, which is the one way this
-    # panel can be wrong.
     by_line: dict[tuple, list] = {}
     for p in facade.panels:
         offset = p.cx * p.nx + p.cy * p.ny
