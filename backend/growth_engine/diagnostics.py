@@ -111,10 +111,16 @@ def shared_boundaries(elements: list[PlacedElement]) -> tuple[float, list[dict]]
     the total as an upper bound on recoverable duplication until it is
     checked against the joinery drawings.
 
-    Only elements on the SAME level are compared. The test works in
+    Only elements that stand on a COMMON storey are compared, and the
+    overlap is counted once for each storey they share. The test works in
     plan, so without that guard a corridor on level 1 standing directly
     above the one on level 0 would report its whole length as shared --
     they are two real walls, one above the other, sharing nothing.
+
+    Comparing e1.level == e2.level looks like the same guard and is not:
+    it also excludes a duplex on levels 0-1 from the level-1 unit beside
+    it, which do share a real wall. That is the pair growth.py was
+    building twice.
 
     Outdoor areas are skipped for the same reason they are skipped in
     resolution: a garden's boundary is not a wall, so a unit standing
@@ -156,10 +162,15 @@ def shared_boundaries(elements: list[PlacedElement]) -> tuple[float, list[dict]]
 
 
 def wall_length(elements: list[PlacedElement]) -> float:
-    """Total edge length summed per element, in cm -- i.e. counting a
-    shared boundary once for each side that claims it. This is the
-    NAIVE figure; compare it against the resolved walls to see what
-    deduplication recovered.
+    """Total edge length summed per element PER STOREY it occupies, in cm
+    -- i.e. counting a shared boundary once for each side that claims it,
+    on every floor that side stands on. This is the NAIVE figure; compare
+    it against the resolved walls to see what deduplication recovered.
+
+    The per-storey multiplier is not decoration. Walls resolve one storey
+    at a time, so a duplex contributes its perimeter twice to the resolved
+    set; charging it once here would leave the invariant holding only
+    where both sides were wrong together.
 
     Counts only elements that build walls, so the naive total and the
     resolved total are measuring the same set and verify_walls compares
