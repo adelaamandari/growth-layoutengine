@@ -83,6 +83,17 @@ export default function App() {
   const [seed, setSeed] = useState(42);
   const [plan, setPlan] = useState(null);
   const [massing, setMassing] = useState(null);
+  // The same building as ONE BOX PER ELEMENT rather than one per room.
+  //
+  // Only the Facade tab uses it, and it is the difference between the
+  // cladding reading as a building and reading as panels floating in the
+  // dark. The facade clads the ELEMENT's wall; per-room massing draws the
+  // rooms inside it, and a surveyed room does not always reach the outer
+  // wall -- Studio_B's rooms cover 89% of its footprint. Where they fall
+  // short the panel is correct and there is simply nothing drawn behind
+  // it. Measured against the envelope instead: 0 panels detached, worst
+  // gap 1 cm, against 6 panels up to 136 cm adrift on the room massing.
+  const [envelope, setEnvelope] = useState(null);
   const [frame, setFrame] = useState(null);
   // The Build tab's own frame: same plan, but with the walls filled at
   // a finer course pitch. Kept separate so the Frame tab keeps showing
@@ -135,13 +146,15 @@ export default function App() {
       // The plan is deterministic in (program, seed), so asking the
       // frame endpoint twice returns two readings of the SAME building
       // -- the structural frame, and that frame with its walls filled.
-      const [p, m, f, bf, fa] = await Promise.all([
-        getPlan(req), getMassing(req), getFrame({ ...req, joint_blocks: jointBlocks }),
+      const [p, m, env, f, bf, fa] = await Promise.all([
+        getPlan(req), getMassing(req), getMassing({ ...req, per_room: false }),
+        getFrame({ ...req, joint_blocks: jointBlocks }),
         getFrame({ ...req, joint_blocks: jointBlocks, course_cm: courseCm }),
         getFacade({ ...req, align }),
       ]);
       setPlan(p);
       setMassing(m);
+      setEnvelope(env);
       setFrame(f);
       setBuildFrame(bf);
       setFacade(fa);
@@ -499,7 +512,7 @@ export default function App() {
                   </div>
                 ) : (
                   <FacadeView
-                    catalog={facadeCatalog} facade={facade} massing={massing}
+                    catalog={facadeCatalog} facade={facade} massing={envelope ?? massing}
                     frame={frame} theme={theme}
                     showMassing={showMassing} showFrame={showFrameBehind}
                     heat={heatmap} only={onlyPanel || null} site={site} animate={animateGrowth}
