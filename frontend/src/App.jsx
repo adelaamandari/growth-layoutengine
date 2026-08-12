@@ -257,6 +257,30 @@ export default function App() {
       <header>
         <h1><b>LinX</b> Growth Engine</h1>
         <span className="sub">Floor plan &amp; massing</span>
+
+        {/* Export sits in the header because it acts on the WHOLE
+            document, not on the panel it used to live beside. In the
+            sidebar it read as one more thing to configure, below the
+            program and the seed; up here it reads as what it is, the way
+            work leaves the app. */}
+        <div className="export-bar" role="group" aria-label="Export">
+          <span className="k">Export</span>
+          {["obj", "svg", "json"].map((k) => (
+            <button
+              key={k} className="btn" disabled={!plan}
+              title={k === "obj"
+                ? `Wavefront OBJ, in metres, grouped per ${perRoom ? "room" : "element"}`
+                : k === "svg" ? "The plan as vector line work"
+                  : "The plan as data — elements, walls, rooms, stats"}
+              onClick={() => download(k, { program, seed, per_room: perRoom }).catch((e) => setError(e.message))}
+            >.{k}</button>
+          ))}
+          <button
+            className="btn" disabled={!plan || pngBusy} onClick={savePng}
+            title="The plan as drawn — current level, layers and theme — at three times screen size, on the paper colour rather than transparent"
+          >{pngBusy ? "…" : ".png"}</button>
+        </div>
+
         <div className="theme">
           <div className="seg" role="group" aria-label="Colour theme">
             {MODES.map((m) => (
@@ -336,27 +360,6 @@ export default function App() {
               </button>
               <button className="btn" onClick={() => setProgram(DEFAULT_PROGRAM)}>Reset</button>
             </div>
-          </div>
-
-          <div className="panel">
-            <h2>Export</h2>
-            <div className="btn-row">
-              {["obj", "svg", "json"].map((k) => (
-                <button key={k} className="btn" disabled={!plan}
-                  onClick={() => download(k, { program, seed, per_room: perRoom }).catch((e) => setError(e.message))}>
-                  .{k}
-                </button>
-              ))}
-              <button className="btn" disabled={!plan || pngBusy} onClick={savePng}>
-                {pngBusy ? "…" : ".png"}
-              </button>
-            </div>
-            <p className="note" style={{ marginTop: 8, fontSize: 11 }}>
-              OBJ is exported in metres, grouped per {perRoom ? "room" : "element"}.
-              PNG is the plan as drawn — current level, layers and theme — at
-              three times screen size, on the paper colour rather than
-              transparent.
-            </p>
           </div>
 
           <div className="panel">

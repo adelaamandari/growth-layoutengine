@@ -217,7 +217,24 @@ header .sub {
 /* Theme control sits at the far end of the header. `auto` is a real
    third option rather than a hidden default — the app follows the OS
    until you say otherwise, and you can see that it is doing so. */
-header .theme { margin-left: auto; align-self: center; }
+/* Export and theme share the far end of the header. The export group
+   takes the auto margin so it anchors the pair; the theme follows it on
+   the header's own 14px gap rather than being pushed to the very edge
+   with a hole between them. */
+header .export-bar {
+  margin-left: auto;
+  align-self: center;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+header .export-bar .k {
+  font-size: 11px; font-weight: 500; letter-spacing: 1px;
+  text-transform: uppercase; color: var(--text-tertiary);
+  margin-right: 2px;
+}
+header .export-bar .btn { padding: 4px 10px; font-size: 12px; }
+header .theme { align-self: center; }
 header .theme .seg button { padding: 4px 9px; }
 
 .layout {
