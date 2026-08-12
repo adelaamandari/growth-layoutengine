@@ -194,7 +194,7 @@ RESIDENTIAL_KEYS = (
 @dataclass
 class PlacedElement:
     kind: str                 # "corridor" | "core" | "stairs" | "unit" | "communal" | "outdoor"
-    label: str                # e.g. "1Bed_A", "SK"
+    label: str                # e.g. "1Bed_A", "Events_Room"
     corners: list[Point]      # 4 corners, in order
     height_cm: float = 300.0  # default single floor
     # Which storey this sits on. 0 is the ground floor. A duplex placed
@@ -712,7 +712,7 @@ def generate_floorplan(program: list[str], seed: int | None = None,
                        reserved: list[list[Point]] | None = None) -> FloorPlan:
     """
     program: ordered list of type keys to place, e.g.
-        ["Lobby", "Studio_A", "SK", "2Bed_A", "Gym", "Garden"]
+        ["Lobby", "Studio_A", "Events_Room", "2Bed_A", "Gym", "Garden"]
     Residential entries must match names in catalog.UNIT_CATALOG.
     Everything else is a flexible shared space: a key in
     shared_spaces.SHARED_CATALOG takes that entry's size range, and any

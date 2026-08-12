@@ -30,8 +30,8 @@ const COURSE_OPTIONS = [300, 150, 100, 75, 60];
 // backend/app/schemas.py, which is the API's default for a request that
 // omits `program`.
 const DEFAULT_PROGRAM = [
-  "Lobby", "Studio_A", "Studio_B", "1Bed_A", "1Bed_B", "SK",
-  "Workspace", "2Bed_A", "2Bed_B", "SL", "Gym", "3Bed_A",
+  "Lobby", "Studio_A", "Studio_B", "1Bed_A", "1Bed_B", "Events_Room",
+  "Workspace", "2Bed_A", "2Bed_B", "Communal_Lounge", "Gym", "3Bed_A",
   "3Bed_B", "Library", "4Bed_A", "4Bed_B", "Garden", "Playground",
 ];
 

@@ -11,7 +11,7 @@ No Rhino/Grasshopper dependency. Intended usage from Claude Code:
     from growth_engine import generate_floorplan, generate_massing
 
     plan = generate_floorplan(
-        program=["Studio_A", "1Bed_B", "SK", "2Bed_A", "SL", "3Bed_A"],
+        program=["Studio_A", "1Bed_B", "Events_Room", "2Bed_A", "Communal_Lounge", "3Bed_A"],
         seed=42,
     )
     blocks = generate_massing(plan)

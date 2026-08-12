@@ -14,7 +14,7 @@ with nothing left over. Unit geometry is real, exported per room from Rhino, for
 all ten unit types.
 
 Alongside the units, the program can carry **shared spaces** — lobby, gym,
-library, workspace, shared kitchen and shared living — and **outdoor ground** —
+library, workspace, events room and communal lounge — and **outdoor ground** —
 garden and playground. These have no survey, so each is a size *range* the
 generator picks inside; that range is the only thing the seed varies. Outdoor
 areas are ground rather than rooms: they build no walls, take no timber frame,
@@ -155,7 +155,7 @@ later. The API is a thin layer on top, not part of it.
 from growth_engine import generate_floorplan, generate_room_massing, plan_to_obj
 
 plan = generate_floorplan(
-    program=["Lobby", "Studio_A", "1Bed_B", "SK", "2Bed_A",
+    program=["Lobby", "Studio_A", "1Bed_B", "Events_Room", "2Bed_A",
              "Gym", "3Bed_A", "Garden", "Playground"],
     seed=42,
 )
@@ -285,7 +285,11 @@ Known gaps, each with the reason it is still open:
   without a filler piece or a narrower type.
 - **No fabrication-length step.** OBJ export writes full-precision metres, which
   is not a real-world cut length.
-- **The adjacency matrix is one rule.** `SL-SK = 2.0` and nothing else.
+- **The adjacency matrix is not wired in at all.** It has been described as
+  "one rule, `SL-SK = 2.0`", but there is no code that reads an adjacency
+  weight anywhere — the effect came from the default program simply listing
+  those two near each other. Program ORDER is the only adjacency the engine
+  has.
 
 See [PROJECT_SUMMARY.md](PROJECT_SUMMARY.md) for the full list and the reasoning
 behind each.

@@ -201,13 +201,18 @@ That file is *not* in this repo.
   floorplan(..., boundary=…)` rejects any placement `polygon_contains` fails,
   and `plan.off_site` audits the result. On by default through `/api/plan`'s
   `constrain_to_site`. The site outline draws in all four 3D views.
-- **Adjacency matrix**: only `SL-SK = 2.0` (SL preferentially follows an SK)
-  is currently wired in as a real rule. The rest of `ADJACENCY_MATRIX.py`
+- **Adjacency matrix**: nothing is wired in.
+
+  > **Corrected 2026-08-12.** This claimed `SL-SK = 2.0` was "wired in as a
+  > real rule". It is not: no code reads an adjacency weight. What produced
+  > the effect was the default program listing the two rooms next to each
+  > other, so they were placed in sequence. Program order is the only
+  > adjacency this engine has, and it should be described as such. The rest of `ADJACENCY_MATRIX.py`
   (GR/G avoiding residential, MH near entrance, ER-GA, etc.) is NOT yet
   implemented — this was a deliberate proof-of-concept scope cut, not an
   oversight.
 - **Program is currently a fixed ordered list** (e.g.
-  `["Studio_A","1Bed_B","SK","2Bed_A","SL","3Bed_A"]`), not randomly
+  `["Studio_A","1Bed_B","Events_Room","2Bed_A","Communal_Lounge","3Bed_A"]`), not randomly
   generated — guarantees exact counts rather than leaving it to chance.
 
 ## Real unit dimension catalog
@@ -403,7 +408,8 @@ frontend/                React + Vite viewer
 - **`shared_spaces.py`** — **NEW.** The flexible half of the program:
   `SharedSpace` carries a frontage RANGE and a depth RANGE rather than a
   measurement, because a shared space has a brief and not a survey. Holds the
-  indoor rooms (Lobby, Gym, Library, Workspace, SK, SL) and the outdoor
+  indoor rooms (Lobby, Gym, Library, Workspace, Events_Room,
+  Communal_Lounge) and the outdoor
   ground (Garden, Playground); `kind` is the `PlacedElement` kind each
   produces, which is what makes an outdoor area walls-free everywhere
   downstream. An unrecognised key falls back to a blank flexible room.
@@ -596,7 +602,8 @@ reaching outward rather than as members switching on.
 from growth_engine import generate_floorplan, generate_room_massing, plan_to_obj
 
 plan = generate_floorplan(
-    program=["Studio_A", "1Bed_B", "SK", "2Bed_A", "SL", "3Bed_A"],
+    program=["Studio_A", "1Bed_B", "Events_Room", "2Bed_A",
+             "Communal_Lounge", "3Bed_A"],
     seed=42,
 )
 blocks = generate_room_massing(plan)  # real rooms where available, else 1 box/unit
@@ -620,7 +627,7 @@ converts (to metres), because that is what Blender and Rhino expect.
 
 ## Known gaps / honest limitations (not yet solved)
 
-- **Adjacency matrix** is barely wired in (one rule: `SL-SK=2.0`). The rest
+- **Adjacency matrix** is not wired in at all — see the correction above. The rest
   of `ADJACENCY_MATRIX.py` needs real implementation, not just a proof of
   concept. (`ADJACENCY_MATRIX.py` is not in this repo either.)
 - ~~**No site boundary**~~ — **solved.** Growth is constrained to the Deptford
@@ -674,7 +681,7 @@ converts (to metres), because that is what Blender and Rhino expect.
   of the shared rooms and outdoor areas. The program list is the real design
   input.
 - **An unknown program key silently becomes a blank flexible room.** That is
-  the fallback `SK`/`SL` relied on before `shared_spaces.py` existed, so it
+  the fallback the old `SK`/`SL` relied on before `shared_spaces.py` existed, so it
   can't be rejected — but it means `Studio_C` builds a blank box rather than
   failing. The API reports `communal` and `suspect` keys so the UI can warn
   (a key that IS in the shared catalog is never suspect); the engine itself

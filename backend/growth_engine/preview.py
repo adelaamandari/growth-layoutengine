@@ -288,8 +288,8 @@ def plan_to_dict(plan: FloorPlan) -> dict:
 
 
 DEFAULT_PROGRAM = [
-    "Studio_A", "Studio_B", "1Bed_A", "1Bed_B", "SK", "2Bed_A",
-    "2Bed_B", "SL", "3Bed_A", "3Bed_B", "4Bed_A", "4Bed_B",
+    "Studio_A", "Studio_B", "1Bed_A", "1Bed_B", "Events_Room", "2Bed_A",
+    "2Bed_B", "Communal_Lounge", "3Bed_A", "3Bed_B", "4Bed_A", "4Bed_B",
 ]
 
 

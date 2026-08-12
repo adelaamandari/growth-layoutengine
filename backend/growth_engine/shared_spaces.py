@@ -97,13 +97,17 @@ _SPACES = (
         "Shared desks and meeting space for working from home.",
     ),
     SharedSpace(
-        "SK", "communal", (500.0, 700.0), (400.0, 700.0),
-        "Shared kitchen. Keeps the size the old flexible communal room "
-        "had, so existing programs generate as before.",
+        "Events_Room", "communal", (700.0, 1200.0), (600.0, 900.0),
+        "Bookable room for gatherings — meetings, classes, parties. "
+        "Sized larger than the shared kitchen it replaces: 42m2 at its "
+        "smallest against that room's 20, because a space you put thirty "
+        "people in is not a kitchen with the chairs pushed back.",
     ),
     SharedSpace(
-        "SL", "communal", (500.0, 800.0), (450.0, 700.0),
-        "Shared living room — the informal counterpart to the workspace.",
+        "Communal_Lounge", "communal", (500.0, 800.0), (450.0, 700.0),
+        "Informal shared sitting room — the relaxed counterpart to the "
+        "workspace. Keeps the range of the shared living room it "
+        "replaces; the brief changed its name, not its size.",
     ),
 
     # --- outdoor ground areas ---------------------------------------
@@ -125,7 +129,7 @@ OUTDOOR_KEYS: tuple[str, ...] = tuple(s.name for s in _SPACES if s.is_outdoor)
 
 # An unrecognised program key still becomes a flexible communal room
 # rather than an error -- that behaviour predates this module and is
-# deliberate (it is what made SK/SL work before there was a catalog for
+# deliberate (it is what made the flexible rooms work before there was a catalog for
 # them). The API reports such keys as `suspect` so a typo is visible
 # instead of silently building a blank box. Sized as the old
 # COMMUNAL_WIDTH_RANGE / COMMUNAL_DEPTH_CM pair, so nothing that relied
