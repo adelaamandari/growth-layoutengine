@@ -322,6 +322,21 @@ frontend/                React + Vite viewer
     reported (`unclad_cm`, split into `too_short_cm` and `remainder_cm`) rather
     than stretched. Nearly all of `too_short_cm` is 170cm corridor ends, which
     want a narrower panel type that does not exist yet.
+
+    > **Updated 2026-08-12.** There is a fourth figure, `open_cm`, and it is
+    > deliberately NOT part of `unclad_cm`: the deck-access corridors take no
+    > cladding at all, because an outdoor walkway wrapped in solid panels stops
+    > being a walkway. Billing that to the shortfall would file a design
+    > decision under "needs a narrower panel", which is the one line in this
+    > report anyone acts on. On the Deptford spine at seed 42: clad 637m, open
+    > 195m, remainder 228m, too short 37m.
+    >
+    > `too_short_cm` also fell sharply — the bay datum below is shared by every
+    > storey on a line, and a storey covering only part of that line could
+    > contain no whole bay at those positions, so walls twice a panel wide came
+    > out bare and were reported as too short. Two fallbacks now re-anchor on
+    > the span, and then on the wall, when that happens. Walls at least one
+    > panel wide with no panel: 0.
   - **The module is anchored per ELEVATION, not per storey.** One datum per plan
     line, shared by every level on it, so panels can only land at
     `base + k*pitch` and a panel on level 2 sits exactly above the one on level 1.
