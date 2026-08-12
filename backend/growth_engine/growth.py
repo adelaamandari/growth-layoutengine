@@ -251,6 +251,29 @@ def _rect(p1: Point, p2: Point, p3: Point, p4: Point) -> list[Point]:
     return [p1, p2, p3, p4]
 
 
+# A stair counts as reached if its footprint comes this close to a
+# corridor's. Not zero: the two are placed from different anchors and a
+# few cm of float drift is not a missing doorway.
+CIRCULATION_TOUCH_CM = 5.0
+
+
+def _footprint_gap(a: PlacedElement, b: PlacedElement) -> float:
+    """Smallest distance between two footprints' outlines, 0 if they touch."""
+    def seg(px, py, p1, p2):
+        dx, dy = p2.x - p1.x, p2.y - p1.y
+        ln = dx * dx + dy * dy
+        t = 0.0 if ln == 0 else max(0.0, min(1.0, ((px - p1.x) * dx + (py - p1.y) * dy) / ln))
+        return ((px - (p1.x + t * dx)) ** 2 + (py - (p1.y + t * dy)) ** 2) ** 0.5
+
+    best = float("inf")
+    for x, y in ((a, b), (b, a)):
+        n = len(y.corners)
+        for c in x.corners:
+            best = min(best, min(seg(c.x, c.y, y.corners[i], y.corners[(i + 1) % n])
+                                 for i in range(n)))
+    return best
+
+
 def builds_walls(el: PlacedElement) -> bool:
     """Does this element have a physical perimeter to build? False for
     outdoor areas, which are ground rather than rooms. See WALLED_KINDS."""
@@ -1023,10 +1046,47 @@ def generate_floorplan(program: list[str], seed: int | None = None,
 
         for br in branches:
             total = max(br["offset_l"], br["offset_r"])
+
+            # A corridor must REACH the stairs standing on it. This runs
+            # last, after every unit and stair on the run is placed, and
+            # it used to be trimmed purely for fit -- so a stair at 30m
+            # with its corridor trimmed back to 12m was a stair you could
+            # see and not walk to. 15 of 24 on the default plan.
+            #
+            # Circulation sitting on this run sets a floor for the trim.
+            # The perpendicular distance is checked too, or a stair on a
+            # PARALLEL run further out would drag this corridor across
+            # the building to reach something that was never on it.
+            reach_for_circulation = 0.0
+            for el in elements:
+                if el.level != level_i or el.kind not in ("core", "stairs"):
+                    continue
+                n = len(el.corners)
+                ex = sum(c.x for c in el.corners) / n
+                ey = sum(c.y for c in el.corners) / n
+                dx, dy = ex - br["start"].x, ey - br["start"].y
+                along = dx * br["dir"].x + dy * br["dir"].y
+                perp = abs(dx * br["pd"].x + dy * br["pd"].y)
+                if along <= 0:
+                    continue
+                span = CORRIDOR_HALF + max(CORE_DEPTH_CM, STAIR_SIZE_CM) / 2 + 20.0
+                if perp <= span:
+                    reach_for_circulation = max(reach_for_circulation, along)
+            total = max(total, reach_for_circulation)
+
             # Trimmed back until it is BOTH on the site and clear of what
             # is already built. The free test is new and matters for the
             # tertiary runs: three corridors radiating from a core cannot
             # foul each other, but a network of them can.
+            #
+            # The reach above is a TARGET, not a floor. Making it a floor
+            # -- refusing to trim below it -- was tried and is exactly
+            # wrong: it drives the corridor through whatever is in the
+            # way and off the site, because those two tests are the only
+            # thing stopping it. That produced wall-check deltas of 6-16m
+            # on every seed and elements off the plot. A corridor that
+            # cannot legally reach its stair means the STAIR is in the
+            # wrong place, and the fix is to drop the stair, below.
             while total > 0 and not (
                     _on_site(_corridor_bay(br, 0.0, total), boundary)
                     and _is_free(occupied, level_i, 1,
@@ -1036,6 +1096,42 @@ def generate_floorplan(program: list[str], seed: int | None = None,
                 _add_corridor(elements, occupied, br["start"],
                               br["start"] + br["dir"].scaled(total),
                               br["dir"], level=level_i)
+
+    # A stair the corridors never reached is not a stair. Corridors are
+    # emitted after the rooms and trimmed to what will legally fit, so a
+    # stair placed at a large offset can end up stranded when its run is
+    # cut back behind it -- 15 of 24 on the default plan, worst 30m from
+    # anything you could walk on.
+    #
+    # Dropped rather than reached for. The corridor cannot be driven out
+    # to it without going through a room or off the plot, so the stair is
+    # in the wrong place, and removing it is the honest repair. Whole
+    # SHAFT at a time, every storey of it: a stair present on levels 0-1
+    # and missing on 2 is worse than no stair, because it reads as
+    # continuous on the drawing.
+    def _stranded_shafts():
+        corridors = [e for e in elements if e.kind == "corridor"]
+        bad = set()
+        for el in elements:
+            if el.kind not in ("core", "stairs"):
+                continue
+            here = [c for c in corridors if c.level == el.level]
+            if not any(_footprint_gap(el, c) <= CIRCULATION_TOUCH_CM for c in here):
+                # Keyed on plan position, which is what a shaft IS -- the
+                # same square on every storey it passes through.
+                n = len(el.corners)
+                bad.add((round(sum(c.x for c in el.corners) / n),
+                         round(sum(c.y for c in el.corners) / n)))
+        return bad
+
+    stranded = _stranded_shafts()
+    if stranded:
+        def _key(el):
+            n = len(el.corners)
+            return (round(sum(c.x for c in el.corners) / n),
+                    round(sum(c.y for c in el.corners) / n))
+        elements = [el for el in elements
+                    if el.kind not in ("core", "stairs") or _key(el) not in stranded]
 
     # Growth probes one storey beyond the last one it could use, and a
     # blocked storey may have been passed through on the way up. Keep
