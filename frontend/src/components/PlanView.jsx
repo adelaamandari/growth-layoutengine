@@ -20,7 +20,7 @@ const floorsOf = (el) => Math.max(1, Math.round((el.height_cm ?? 300) / 300));
 // Crossfield grid violet, so the two systems are told apart at a glance.
 const FAMILY_STROKE = ["#eb6834", "#8a6fd6", "#2a78d6"];
 
-export default function PlanView({ plan, layers, level = 0, site = null, grid = null }) {
+export default function PlanView({ plan, layers, level = 0, site = null, grid = null, svgOut = null }) {
   const svgRef = useRef(null);
   const wrapRef = useRef(null);
   const [tip, setTip] = useState(null);
@@ -126,7 +126,13 @@ export default function PlanView({ plan, layers, level = 0, site = null, grid = 
   return (
     <div className="viewport" ref={wrapRef}>
       <svg
-        ref={svgRef}
+        ref={(node) => {
+          svgRef.current = node;
+          // The PNG export rasterises THIS element, so what is saved is
+          // what is on screen -- same layers, level, zoom and theme. A
+          // separate renderer could disagree with this one.
+          if (svgOut) svgOut.current = node;
+        }}
         viewBox={`${view.x} ${view.y} ${view.w} ${view.h}`}
         role="img"
         aria-label="Generated floor plan"
@@ -291,8 +297,8 @@ export default function PlanView({ plan, layers, level = 0, site = null, grid = 
           return (
             <text
               key={`t${i}`} x={cx} y={-cy} textAnchor="middle"
-              fontSize={92 * zoom} fontFamily="var(--sans)" fill="var(--ink)"
-              paintOrder="stroke" stroke="var(--paper)" strokeWidth={3.5 * zoom}
+              fontSize={112 * zoom} fontFamily="var(--sans)" fill="var(--ink)"
+              paintOrder="stroke" stroke="var(--paper)" strokeWidth={4.5 * zoom}
             >{el.label}</text>
           );
         })}

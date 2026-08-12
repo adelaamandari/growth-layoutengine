@@ -1,10 +1,11 @@
-import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   download, getCatalog, getFacade, getFacadeCatalog, getFrame, getMassing, getPlan, getSite, getSiteGrid,
 } from "./api";
 import PlanView from "./components/PlanView";
 import ProgramEditor from "./components/ProgramEditor";
 import { MODES, useTheme } from "./useTheme";
+import { exportPlanPng } from "./components/planPng";
 
 // three.js is ~600kB and only the 3D tabs need it, so they load on
 // first use rather than blocking the plan view.
@@ -113,6 +114,10 @@ export default function App() {
   // The dividers between the rooms inside a unit, as opposed to the
   // walls around it. Same filter mechanism as the ceilings.
   const [showPartitions, setShowPartitions] = useState(true);
+  // The live plan <svg>, handed up by PlanView so the PNG export can
+  // rasterise exactly what is drawn rather than re-deriving it.
+  const planSvgRef = useRef(null);
+  const [pngBusy, setPngBusy] = useState(false);
   const [tab, setTab] = useState("plan");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
@@ -137,6 +142,33 @@ export default function App() {
     getSite().then(setSite).catch(() => setSite(null));
     getSiteGrid().then(setGrid).catch(() => setGrid(null));
   }, []);
+
+  // PNG is the one export that does not go through the API. The plan is
+  // already an SVG in the page, so it is rasterised here -- see
+  // components/planPng.js for why a server-side renderer would be worse.
+  //
+  // PlanView only mounts on the Plan tab, so the <svg> may not exist
+  // when the button is pressed. Switch to it and let it paint first
+  // rather than disabling the button on other tabs, which would leave a
+  // dead control with no explanation.
+  const savePng = useCallback(async () => {
+    setPngBusy(true);
+    setError(null);
+    try {
+      if (!planSvgRef.current) {
+        setTab("plan");
+        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      }
+      await exportPlanPng(planSvgRef.current, {
+        scale: 3,
+        filename: `plan-seed${seed}-L${level}.png`,
+      });
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setPngBusy(false);
+    }
+  }, [seed, level]);
 
   const regenerate = useCallback(async () => {
     setBusy(true);
@@ -315,9 +347,15 @@ export default function App() {
                   .{k}
                 </button>
               ))}
+              <button className="btn" disabled={!plan || pngBusy} onClick={savePng}>
+                {pngBusy ? "…" : ".png"}
+              </button>
             </div>
             <p className="note" style={{ marginTop: 8, fontSize: 11 }}>
               OBJ is exported in metres, grouped per {perRoom ? "room" : "element"}.
+              PNG is the plan as drawn — current level, layers and theme — at
+              three times screen size, on the paper colour rather than
+              transparent.
             </p>
           </div>
 
@@ -497,7 +535,7 @@ export default function App() {
             )}
           </div>
 
-          {tab === "plan" && <PlanView plan={plan} layers={layers} level={level} site={site} grid={grid} />}
+          {tab === "plan" && <PlanView plan={plan} layers={layers} level={level} site={site} grid={grid} svgOut={planSvgRef} />}
           {tab !== "plan" && (
             <Suspense fallback={<div className="viewport" style={{ padding: 20 }}><span className="muted">Loading 3D view…</span></div>}>
               {tab === "massing" && <MassingView massing={massing} animate={animateGrowth} theme={theme} site={site} />}
