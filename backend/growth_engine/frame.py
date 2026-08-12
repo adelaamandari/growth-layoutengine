@@ -630,6 +630,24 @@ def build_frame(plan: FloorPlan, joint_blocks: bool = False,
         plate = next((m for m in joint["members"] if m["name"] == "N"), None)
     lacing = [m for m in (joint["members"] if joint else []) if m["name"] != "N"]
 
+    # Everything that stands AT a node -- the column's own parts, the
+    # connector plate, the woven capital -- is laid out in the plan's
+    # frame, not the world's.
+    #
+    # These used to be added as node.x + m["c"][0] with angle 0, which is
+    # correct only while the building is square to the page. The spine
+    # strategy turns the whole armature onto the site grid, so the beams
+    # ran at the grid angle while every column head stayed square: on the
+    # Deptford plot that reads as a column rotated against its own beams,
+    # which is what Adela saw. Same fault the core had before it was
+    # given the axes.
+    grid_angle = atan2(u_ax.y, u_ax.x)
+
+    def _at_node(node, dx: float, dy: float) -> tuple[float, float]:
+        """A node-local offset placed in the plan's frame."""
+        return (node.x + dx * u_ax.x + dy * v_ax.x,
+                node.y + dx * u_ax.y + dy * v_ax.y)
+
     # --- columns: step 4r -------------------------------------------
     # UNBROKEN from the ground to the top of the highest level the node
     # sits under. A storey the plan does not occupy at this node is
@@ -641,12 +659,13 @@ def build_frame(plan: FloorPlan, joint_blocks: bool = False,
             if column:
                 for m in column["members"]:
                     cz = base + m["c"][2]
+                    mx, my = _at_node(node, m["c"][0], m["c"][1])
                     members.append(FrameMember(
                         kind="post", component="Column",
-                        cx=node.x + m["c"][0], cy=node.y + m["c"][1],
+                        cx=mx, cy=my,
                         cz=cz,
                         sx=m["s"][0], sy=m["s"][1], sz=m["s"][2],
-                        angle=0.0, node_id=node.id,
+                        angle=grid_angle, node_id=node.id,
                         growth_step=_step(node.depth, cz, PHASE_COLUMN),
                     ))
             else:
@@ -656,7 +675,7 @@ def build_frame(plan: FloorPlan, joint_blocks: bool = False,
                     kind="post", component="Column",
                     cx=node.x, cy=node.y, cz=cz,
                     sx=sec * 4, sy=sec * 4, sz=STOREY_CM,
-                    angle=0.0, node_id=node.id,
+                    angle=grid_angle, node_id=node.id,
                     growth_step=_step(node.depth, cz, PHASE_COLUMN),
                 ))
             if plate:
@@ -664,12 +683,13 @@ def build_frame(plan: FloorPlan, joint_blocks: bool = False,
                 # spans 290..300), so the storey base is all that needs
                 # adding.
                 cz = base + plate["c"][2]
+                px, py = _at_node(node, plate["c"][0], plate["c"][1])
                 members.append(FrameMember(
                     kind="plate", component="N",
-                    cx=node.x + plate["c"][0], cy=node.y + plate["c"][1],
+                    cx=px, cy=py,
                     cz=cz,
                     sx=plate["s"][0], sy=plate["s"][1], sz=plate["s"][2],
-                    angle=0.0, node_id=node.id,
+                    angle=grid_angle, node_id=node.id,
                     growth_step=_step(node.depth, cz, PHASE_COLUMN),
                 ))
 
@@ -695,12 +715,13 @@ def build_frame(plan: FloorPlan, joint_blocks: bool = False,
                 base = s * STOREY_CM
                 for m in lacing:
                     cz = base + m["c"][2]
+                    lx, ly = _at_node(node, m["c"][0], m["c"][1])
                     members.append(FrameMember(
                         kind="lacing", component=m["name"],
-                        cx=node.x + m["c"][0], cy=node.y + m["c"][1],
+                        cx=lx, cy=ly,
                         cz=cz,
                         sx=m["s"][0], sy=m["s"][1], sz=m["s"][2],
-                        angle=0.0, node_id=node.id,
+                        angle=grid_angle, node_id=node.id,
                         growth_step=_step(node.depth, cz, PHASE_COLUMN),
                     ))
 
@@ -768,10 +789,19 @@ def build_frame(plan: FloorPlan, joint_blocks: bool = False,
         for di, dj in ((1, 0), (-1, 0), (0, 1), (0, -1)):
             if index.get((i + di, j + dj)) is not None:
                 continue                       # a real span goes here
-            length = _reach_to_edge(a.x, a.y, di, dj, boxes)
+            # (di, dj) is a step on the GRID, not a world direction, and
+            # the two are only the same while the building is square to
+            # the page. Used raw, every stub shot off along the world
+            # axes while its column and its primary beams ran at the grid
+            # angle -- 876 of 3,498 beams on the Deptford plan, a quarter
+            # of them, pointing the wrong way and reaching for a building
+            # line that is not there.
+            dirx = di * u_ax.x + dj * v_ax.x
+            diry = di * u_ax.y + dj * v_ax.y
+            length = _reach_to_edge(a.x, a.y, dirx, diry, boxes)
             if length < MIN_STUB_CM:
                 continue
-            ang = atan2(float(dj), float(di))
+            ang = atan2(diry, dirx)
             for storey in sorted(a.levels):
                 cz = (storey + 1) * STOREY_CM - CATALOG["N"]["thickness_cm"] / 2
                 cursor = 0.0
@@ -781,7 +811,7 @@ def build_frame(plan: FloorPlan, joint_blocks: bool = False,
                     mid = cursor + part / 2
                     members.append(FrameMember(
                         kind="beam", component=name,
-                        cx=a.x + di * mid, cy=a.y + dj * mid, cz=cz,
+                        cx=a.x + dirx * mid, cy=a.y + diry * mid, cz=cz,
                         sx=part, sy=spec["width_cm"], sz=spec["thickness_cm"],
                         angle=ang, node_id=-1, grow_sign=-1,
                         growth_step=_step(a.depth, cz, PHASE_BEAM),
