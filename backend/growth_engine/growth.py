@@ -458,8 +458,35 @@ def _try_add_shared(elements, occupied, edge_start: Point, edge_end: Point,
     and the "outdoor" kind, and everything downstream reads the kind.
     """
     height = OUTDOOR_HEIGHT_CM if spec.is_outdoor else LEVEL_HEIGHT_CM
+
+    # The shrink has a FLOOR, and needs one. It used to run 0.68 seven
+    # times unbounded -- 0.068 of the asked depth -- so an SK briefed at
+    # 4-7m deep was built 6.5 x 1.3m, 8.7m2, a 4.8:1 slot indistinguishable
+    # from a corridor. Flexible was doing the work of "any shape at all".
+    #
+    # Two things hold it up, and the room must clear BOTH:
+    #   the brief's own shallowest depth, and
+    #   the brief's own smallest area, which on a short frontage needs
+    #   MORE depth than the minimum, not less.
+    # Neither is a new number -- both come off the range already in
+    # shared_spaces.py, so they cannot drift from the brief.
+    frontage = ((edge_end.x - edge_start.x) ** 2
+                + (edge_end.y - edge_start.y) ** 2) ** 0.5
+    floor_depth = spec.depth_cm[0]
+    if frontage > 0:
+        floor_depth = max(floor_depth, spec.min_area_cm2 / frontage)
+    # A frontage so short that the area cannot be made even at the
+    # brief's deepest is the wrong bay for this room. Fail, and let the
+    # run walk offer it another one, rather than building a thin version
+    # of it here.
+    if floor_depth > spec.depth_cm[1]:
+        return False
+    depth = max(depth, floor_depth)
+
     shrink = 1.0
     for _attempt in range(7):
+        if depth * shrink < floor_depth - 0.5:
+            return False
         off = perp_dir.scaled(side * depth * shrink)
         c1, c2 = edge_start, edge_end
         c3, c4 = edge_end + off, edge_start + off

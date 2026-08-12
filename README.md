@@ -249,9 +249,10 @@ which before reading a number.
 - `unclad_cm` / `open_cm` — wall the panel set cannot cover, kept apart from
   wall left open on purpose.
 
-On the default 18-entry program **at seed 42**, the branch strategy resolves
-715.6 m of drawn wall down to **572.2 m across 112 walls, 33 of them shared —
-1,716.5 m²**. The seed belongs in that figure: shared spaces draw their size
+On the default 18-entry program (`app/schemas.py`) **at seed 42**, the branch
+strategy resolves 945.7 m of drawn wall down to **752.2 m across 147 walls, 44
+of them shared — 2,256.7 m²**. The seed belongs in that figure: shared spaces
+draw their size
 from a range, so an unseeded plan totals differently every run, and figures in
 this repo were once quoted unseeded and could never be reproduced. What holds on
 any run is `delta_m == 0.00`.

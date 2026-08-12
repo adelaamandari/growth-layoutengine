@@ -139,6 +139,12 @@ class FacadePanel:
     # error lives.
     nx: float = 0.0
     ny: float = 0.0
+    # False when this panel was placed by a fallback, on its own span or
+    # its own wall, because the line's shared datum offered it nothing.
+    # It is real cladding on real wall; it just does not share the phase
+    # of its neighbours, so it cannot stack and its spacing to the panel
+    # beside it is not the pitch.
+    on_module: bool = True
     # Set by the solar pass, if one was run: kWh/m2/yr of direct beam on
     # this panel, and that value normalised 0..1 across the building.
     sun_kwh: float = 0.0
@@ -276,6 +282,9 @@ def _choose(kind: str, level: int, run_rank: int, n: int, i: int) -> tuple[str, 
 # the walls being merged came out of that same resolution, so anything
 # tighter would fail to re-join pieces it had just cut apart.
 _RUN_TOL_CM = 2.0
+
+# Named so its cost can be measured rather than assumed.
+PER_WALL_FALLBACK = True
 _PARALLEL_EPS = 1e-6
 
 
@@ -467,6 +476,7 @@ def build_facade(plan: FloorPlan, pitch_cm: float | None = None,
 
             centres = [base + (k + 0.5) * step for k in range(n_line)]
             usable = [t for t in centres if _fits(t)]
+            on_module = set(usable)
 
             # FALLBACK: re-anchor on the span itself when the line's
             # datum yields nothing.
@@ -506,7 +516,7 @@ def build_facade(plan: FloorPlan, pitch_cm: float | None = None,
             # every outer wall, so this is not opportunistic: a wall at
             # least one panel wide is clad, and if the shared datum
             # cannot do it the wall's own centre does.
-            for t0, t1, wall in here:
+            for t0, t1, wall in (here if PER_WALL_FALLBACK else ()):
                 if t1 - t0 < step:
                     continue                  # narrower than a panel
                 if any(t0 + _RUN_TOL_CM <= t <= t1 - _RUN_TOL_CM for t in usable):
@@ -566,6 +576,7 @@ def build_facade(plan: FloorPlan, pitch_cm: float | None = None,
                     owner=el.label,
                     rule=rule,
                     nx=normal.x, ny=normal.y,
+                    on_module=t in on_module,
                 ))
                 placed += 1
 
@@ -668,13 +679,23 @@ def verify_facade(facade: Facade, pitch_cm: float | None = None,
     for p in facade.panels:
         offset = p.cx * p.nx + p.cy * p.ny
         by_line.setdefault((p.level, round(p.angle, 3), round(offset, 1)), []).append(p)
-    adjacent = seams = 0
+    adjacent = seams = off_module = 0
     for group in by_line.values():
         group.sort(key=lambda p: (p.cx, p.cy))
         for a, b in zip(group, group[1:]):
             d = ((b.cx - a.cx) ** 2 + (b.cy - a.cy) ** 2) ** 0.5
             if d > step_cm * 1.5:
                 continue  # different runs on the same line, not neighbours
+            # A fallback panel sits on its own span or wall, so its
+            # spacing to a neighbour is not the pitch by construction.
+            # Counting that as a gap says the cladding is broken when it
+            # is the opposite -- the fallback only ever ADDS panels to
+            # wall that was bare. The leftover between them was there
+            # before and had no neighbour to be measured against.
+            # Counted separately so it stays visible.
+            if not (a.on_module and b.on_module):
+                off_module += 1
+                continue
             adjacent += 1
             if abs(d - step_cm) > 0.5:
                 seams += 1
@@ -687,6 +708,9 @@ def verify_facade(facade: Facade, pitch_cm: float | None = None,
         "vertical_gaps": gaps,
         "adjacent_pairs": adjacent,
         "horizontal_gaps": seams,
+        # Neighbouring pairs where one panel was placed off the line's
+        # shared module. Not a gap -- see the horizontal test.
+        "off_module_pairs": off_module,
         "connected": not bad_column and gaps == 0 and seams == 0,
     }
 

@@ -87,8 +87,9 @@ Adela's renders.
   > owned by whichever elements cover it. `FloorPlan.walls` holds them,
   > `PlacedElement.wall_ids` references them.
   >
-  > On the default program **at seed 42** this takes 715.6m of drawn wall down
-  > to **572.2m across 112 walls, 33 of them shared — 1,716.5 m²**. A
+  > On the default program — the 18-entry one in `app/schemas.py`, which is
+  > what the API and the UI use — **at seed 42** this takes 945.7m of drawn
+  > wall down to **752.2m across 147 walls, 44 of them shared — 2,256.7 m²**. A
   > consequence worth confirming against the drawings: cutting a corridor edge
   > where units meet it puts an **N node at each junction**, so a long corridor
   > wall is now several spans rather than one continuous mirrored sequence.

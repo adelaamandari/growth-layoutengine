@@ -65,6 +65,17 @@ class SharedSpace:
     def max_area_m2(self) -> float:
         return (self.frontage_cm[1] / 100) * (self.depth_cm[1] / 100)
 
+    @property
+    def min_area_cm2(self) -> float:
+        """The smallest this room is allowed to be, in cm2.
+
+        The brief's own floor -- shortest frontage by shallowest depth --
+        rather than a separate number that could drift from it. A gym
+        that has been squeezed under this is not a small gym, it is a
+        corridor with a gym's name on it.
+        """
+        return self.frontage_cm[0] * self.depth_cm[0]
+
 
 _SPACES = (
     # --- shared indoor rooms ----------------------------------------
