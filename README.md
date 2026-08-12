@@ -21,7 +21,9 @@ areas are ground rather than rooms: they build no walls, take no timber frame,
 are not counted as floor area, and draw green.
 
 The envelope is clad from a surveyed set of **nine facade panels** (A–I), each a
-fixed 330 × 310 cm module of the same 10×10 and 10×20 timber the frame uses. The
+fixed 330 × 310 cm module of the same 10×10 and 10×20 timber the frame uses,
+plus a tenth — **J**, a 110 cm guard rail for the open decks, which is derived
+rather than surveyed and is marked as such. The
 engine picks one per exterior bay from what is behind it — circulation, ground or
 upper dwelling, shared space — and reports how much wall the set cannot cover
 rather than stretching a panel to fit. **Deck-access corridors are left open**:
@@ -210,7 +212,7 @@ frontend/             React + Vite viewer
 | `POST` | `/api/frame` | timber members, columns, and the support report |
 | `GET` | `/api/site` | the real plot, in cm relative to the entrance |
 | `GET` | `/api/site/grid` | the grid families read off the site's edges |
-| `GET` | `/api/facade/catalog` | the nine panel types (A–I) with their member geometry |
+| `GET` | `/api/facade/catalog` | the panel types (A–I surveyed, J derived) with their member geometry |
 | `POST` | `/api/facade` | which panel clads which exterior bay, and why |
 | `POST` | `/api/export/{obj,svg,json}` | file download |
 
@@ -272,9 +274,17 @@ Known gaps, each with the reason it is still open:
 - **Green misses its band on most seeds** (20–52% against 30–40). Circulation
   displaces the units that spread the footprint, and the courtyard lever cannot
   reach *residual* ground — reserving less does not make the building bigger.
-- **Open decks have no guarding drawn.** There is no balustrade among the nine
-  panels. A synthesised one was built and reverted pending a real component;
-  `git log --grep "Panel J"` finds it.
+- **The guard panel is derived, not surveyed.** Nine of the ten panels came out
+  of Adela's GLBs; **J**, the 110 cm balustrade on the open decks, was generated
+  by `facade_import.derived_guard_panel` and says so in its own `source` field.
+  Its 1100 mm height and 65 mm gaps were aimed at Approved Document K but are
+  not certified. Replace it the moment a real component exists — it is added at
+  load time, so that is a one-function change.
+- **A fifth of the skin is remainder.** 20.8% of exterior wall is what is left
+  at the ends of clad runs, because the panel is a fixed 330 and runs are not
+  multiples of it — 85 exterior lines on the test plan, 29 exactly one bay long.
+  A further 3.3% sits on walls narrower than a single panel. Neither closes
+  without a filler piece or a narrower type.
 - **No fabrication-length step.** OBJ export writes full-precision metres, which
   is not a real-world cut length.
 - **The adjacency matrix is one rule.** `SL-SK = 2.0` and nothing else.

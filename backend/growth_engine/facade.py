@@ -206,7 +206,15 @@ def _choose(kind: str, level: int, run_rank: int, n: int, i: int) -> tuple[str, 
 
     The rules are Adela's, one per line:
 
-      circulation      C   -- "no need for shading, can apply to anything"
+      corridor         J   -- open deck access: guarding, no cladding.
+                            Only reaches here when the corridor is NOT
+                            between two-sided building, which needs no
+                            test: an exterior wall has one owner, so a
+                            double-loaded corridor has no exterior long
+                            wall to clad in the first place.
+      core, stairs     C   -- "no need for shading, can apply to
+                            anything". Enclosed, unlike the corridor: a
+                            lift shaft and a fire escape are rooms.
       unit, ground     B   -- "solid facade, ground floor"
       unit, upper      I on the principal elevation's first bay, one
                             balcony per unit per storey; then E/D across
@@ -219,7 +227,13 @@ def _choose(kind: str, level: int, run_rank: int, n: int, i: int) -> tuple[str, 
       shared space     F/G/H by elevation rank -- three, two and one full
                             window. The most open panel goes on the
                             longest elevation, so a lobby or a gym takes
-                            its light on its best face.
+                            its light on its best face. At EVERY level,
+                            ground included: the solid-ground rule is
+                            residential and does not apply to them.
+
+    Every outer wall of a residential unit is clad, which is a rule about
+    coverage rather than choice and is enforced in build_facade by the
+    per-wall fallback, not here.
     """
     if kind == "corridor":
         # OPEN. A deck-access corridor is outdoor circulation, and
