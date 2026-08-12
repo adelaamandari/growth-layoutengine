@@ -757,6 +757,31 @@ converts (to metres), because that is what Blender and Rhino expect.
 
 ## Solved since the original summary
 
+- ~~**The columns stood square to the page on a rotated plan.**~~ Resolved
+  2026-08-13. Everything standing AT a grid node — the column's parts, the
+  connector plate, the woven capital — was placed as `node.x + offset` with
+  `angle=0`, which is world axes. Correct while the building is square, wrong
+  the moment the spine strategy turns the armature onto the site grid: the
+  beams ran at 58° on the Deptford plot and every column head stayed at 0°,
+  which reads as a column rotated against its own beams.
+
+  > Measuring rather than looking found a second one in the same expression
+  > family: the edge stubs take a GRID step `(1,0)`/`(0,1)` and used it as a
+  > WORLD direction, both to measure how far the massing continues and to
+  > place the members — so 876 of 3,498 beams, a quarter, pointed along the
+  > world axes and reached for a building line that was not there.
+  >
+  > Posts, plates and capitals on the grid angle: 0% → 100%. Beams: 74% →
+  > 99.1%, the remaining 32 being the transfer beams that brace an
+  > unsupported plate and are meant to sit at whatever angle that takes.
+  >
+  > **The branch strategy was never affected**, because its axes ARE the world
+  > axes and every one of these expressions was already correct there. That is
+  > why it survived so long, and it is the thing to remember: an expression
+  > that mixes grid and world coordinates is invisible until something
+  > rotates.
+
+
 - ~~**The 240×240 joint block does not fit its own plan.**~~ Resolved
   2026-08-06 — by the structural grid rather than by anything done to the
   joint. When nodes came from wall ends they landed wherever a wall happened
