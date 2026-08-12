@@ -45,13 +45,9 @@ export const PANEL_COLOR = {
   G: 0xc0ccd1,  // two full windows  (shared)
   F: 0xdae3e7,  // three full windows(shared)
   I: 0xc4703f,  // balcony — the one that sticks out
-  // Guarding on the open decks. Derived, not surveyed, so it is given a
-  // colour of its own rather than borrowing a cladding one -- it should
-  // be obvious in the view that this panel is not from the GLBs.
-  J: 0x7d8a6a,
 };
 
-const ORDER = ["A", "B", "C", "D", "E", "H", "G", "F", "I", "J"];
+const ORDER = ["A", "B", "C", "D", "E", "H", "G", "F", "I"];
 
 /**
  * Expand panel instances into one InstancedMesh.
