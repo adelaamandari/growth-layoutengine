@@ -438,20 +438,46 @@ def build_facade(plan: FloorPlan, pitch_cm: float | None = None,
             placed = 0
             open_bays = 0
 
-            for k in range(n_line):
-                # The panel sits centred in its bay. In "run" mode the
-                # bay IS the panel, so a and b are its edges; in "grid"
-                # mode the bay is 30cm wider and the panel is inset 15cm
-                # at each column line.
-                t = base + (k + 0.5) * step
+            # Bay centres from the LINE's datum, which is what makes
+            # panels stack column-on-column up the building.
+            #
+            # A bay only counts if the whole PANEL lands on real wall.
+            # Testing the midpoint alone would hang panels off the end of
+            # a short storey where the elevation steps back.
+            def _fits(t):
+                return any(s0 - _RUN_TOL_CM <= t - panel_w / 2
+                           and t + panel_w / 2 <= s1 + _RUN_TOL_CM
+                           for s0, s1 in spans)
+
+            centres = [base + (k + 0.5) * step for k in range(n_line)]
+            usable = [t for t in centres if _fits(t)]
+
+            # FALLBACK: re-anchor on the span itself when the line's
+            # datum yields nothing.
+            #
+            # The line datum is shared by every storey on the line, and a
+            # storey that covers only part of that line can contain no
+            # whole bay at those positions -- so a 7.2m core wall came
+            # out with zero panels while being more than twice a panel
+            # wide, and was then reported as "too short for any panel",
+            # which it plainly is not. That was most of the missing skin.
+            #
+            # The cost is real and worth stating: panels placed this way
+            # are centred in their own span, so they do NOT line up with
+            # the storey above. Cladding a wall out of alignment beats
+            # leaving it bare, but it is a second-best and only runs
+            # where the first choice placed nothing at all.
+            if not usable:
+                for s0, s1 in spans:
+                    n_span = int((s1 - s0) // step)
+                    if n_span < 1:
+                        continue
+                    b0 = s0 + ((s1 - s0) - n_span * step) / 2
+                    usable += [b0 + (i + 0.5) * step for i in range(n_span)]
+
+            for k, t in enumerate(usable):
                 a = t - panel_w / 2
                 b = t + panel_w / 2
-                # The whole PANEL has to be on real wall. Testing only
-                # the midpoint would hang panels off the end of a short
-                # storey, where the elevation steps back.
-                if not any(s0 - _RUN_TOL_CM <= a and b <= s1 + _RUN_TOL_CM
-                           for s0, s1 in spans):
-                    continue
 
                 # Which wall is this bay on? The run may cross several
                 # elements, and the panel is chosen by what is behind it,
@@ -476,7 +502,7 @@ def build_facade(plan: FloorPlan, pitch_cm: float | None = None,
                 angle = atan2(normal.x, -normal.y)
 
                 panel, rule = _choose(el.kind, level, rank_of.get(wall.id, 0),
-                                      n_line, k)
+                                      len(usable), k)
                 if panel is OPEN:
                     open_bays += 1
                     continue
@@ -507,12 +533,18 @@ def build_facade(plan: FloorPlan, pitch_cm: float | None = None,
             open_len = min(open_bays * panel_w, level_len - placed * panel_w)
             out.open_cm += open_len
             short = level_len - placed * panel_w - open_len
-            out.unclad_cm += short
             if placed:
+                out.unclad_cm += short
                 out.remainder_cm += short
             elif open_bays:
-                pass                      # the whole run is open by choice
+                # An open run's leftover is open too. This used to go to
+                # unclad_cm with no bucket behind it, so unclad exceeded
+                # remainder + too_short by 73.5m on the default plan and
+                # the report did not add up -- an open deck was being
+                # billed for the wall it deliberately does not have.
+                out.open_cm += short
             else:
+                out.unclad_cm += short
                 out.too_short_cm += level_len
                 out.too_short_runs.append(
                     (round(level_len, 1), plan.elements[here[0][2].owners[0]].label))
