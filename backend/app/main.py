@@ -31,6 +31,10 @@ from growth_engine import (
 )
 from growth_engine.growth import CORE_SIZE_CM, CORRIDOR_WIDTH_CM
 from growth_engine.shared_spaces import INDOOR_KEYS, OUTDOOR_KEYS, SHARED_CATALOG
+import hashlib
+from pathlib import Path
+
+import growth_engine
 from growth_engine.frame import (
     STOREY_CM, build_frame, frame_summary, support_report,
 )
@@ -191,9 +195,63 @@ def _room_polys(el):
     return result
 
 
+# --- is this process running the code that is on disk? -------------------
+#
+# Python imports a module once. uvicorn without --reload therefore serves
+# whatever the engine looked like when it started, and nothing about the
+# response says so -- which cost four rounds of this project chasing
+# "bugs" that were already fixed on disk: a facade that still had panel J
+# in it, a gym still 1.5m deep, a dropdown still listing SK.
+#
+# So the server checks ITSELF rather than trusting anyone to remember.
+# The fingerprint is taken at import and recomputed on every /api/health;
+# if they differ, the files changed after this process loaded them and
+# the answers it is giving are out of date.
+#
+# Size and mtime rather than content: it runs on every health poll, and a
+# change that keeps both identical is not one anyone makes by editing.
+def _source_state() -> dict[str, tuple[int, int]]:
+    roots = [Path(growth_engine.__file__).parent, Path(__file__).parent]
+    out: dict[str, tuple[int, int]] = {}
+    for root in roots:
+        for f in root.rglob("*.py"):
+            if "__pycache__" in f.parts:
+                continue
+            try:
+                st = f.stat()
+            except OSError:
+                continue
+            out[str(f)] = (st.st_size, st.st_mtime_ns)
+    return out
+
+
+def _fingerprint(state: dict[str, tuple[int, int]]) -> str:
+    joined = "|".join(f"{k}:{v[0]}:{v[1]}" for k, v in sorted(state.items()))
+    return hashlib.sha1(joined.encode()).hexdigest()[:12]
+
+
+_STARTUP_STATE = _source_state()
+_STARTUP_FINGERPRINT = _fingerprint(_STARTUP_STATE)
+
+
 @app.get("/api/health")
 def health() -> dict:
-    return {"ok": True, "units": len(UNIT_CATALOG)}
+    now = _source_state()
+    changed = sorted(
+        Path(k).name for k in set(now) | set(_STARTUP_STATE)
+        if now.get(k) != _STARTUP_STATE.get(k)
+    )
+    return {
+        "ok": True,
+        "units": len(UNIT_CATALOG),
+        # What this process is actually running.
+        "version": _STARTUP_FINGERPRINT,
+        "source_version": _fingerprint(now),
+        # True when the two differ: the engine has been edited since this
+        # server loaded it, so every answer below is from the old code.
+        "stale": bool(changed),
+        "changed_files": changed[:12],
+    }
 
 
 @app.get("/api/catalog", response_model=CatalogResponse)

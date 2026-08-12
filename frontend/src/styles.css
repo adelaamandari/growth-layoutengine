@@ -428,6 +428,17 @@ tr:last-child td { border-bottom: 0; }
   flex: 0 0 auto; padding: 9px 12px; border: 1px solid var(--dup); color: var(--banner-ink);
   font-size: 12px; margin-bottom: 12px; background: var(--bg-light);
 }
+/* The stale-API notice. Distinguished from an error because nothing has
+   failed -- the server is answering correctly from code that is no
+   longer the code on disk, which is a different thing and wants a
+   different colour. */
+.banner.warn {
+  border-color: var(--accent);
+  background: var(--bg-medium);
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px;
+}
+.banner.warn code { margin-left: 2px; }
+
 .muted { font-size: 12px; color: var(--text-tertiary); }
 /* The one genuinely monospace thing left: a shell command you would
    paste. Everything else that used to be mono is Jost now. */

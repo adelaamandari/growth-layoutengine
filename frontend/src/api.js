@@ -19,6 +19,19 @@ async function post(path, body) {
   return res;
 }
 
+/**
+ * Liveness, and whether the server is running the code that is on disk.
+ *
+ * Python imports a module once, so a backend started without --reload
+ * serves the engine as it was at startup and nothing in a plan response
+ * says so. `stale` is the server noticing that about itself.
+ */
+export async function getHealth() {
+  const res = await fetch("/api/health");
+  if (!res.ok) throw new Error("The API is not responding.");
+  return res.json();
+}
+
 export async function getCatalog() {
   const res = await fetch("/api/catalog");
   if (!res.ok) throw new Error("Could not load the unit catalog.");

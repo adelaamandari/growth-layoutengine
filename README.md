@@ -144,6 +144,15 @@ npm run dev          # http://localhost:5173
 The frontend proxies `/api` to port 8000, so the browser only ever talks to one
 origin and there is no CORS step in development.
 
+**The backend does not hot-reload by default, and it tells you so.** Python
+imports a module once, so a server started without `--reload` keeps serving the
+engine as it was when it started — which cost this project four rounds of
+chasing bugs that were already fixed on disk. `/api/health` now fingerprints the
+engine source at startup and again on every call; when they differ it returns
+`stale: true` with the files that changed, and the UI shows a banner above the
+stats saying every figure below it is from the old code. Restart the backend and
+it clears.
+
 ## Using the engine on its own
 
 The engine is a plain Python package with **no dependency beyond the standard

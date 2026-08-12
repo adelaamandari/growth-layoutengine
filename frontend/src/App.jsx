@@ -1,6 +1,6 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  download, getCatalog, getFacade, getFacadeCatalog, getFrame, getMassing, getPlan, getSite, getSiteGrid,
+  download, getCatalog, getFacade, getFacadeCatalog, getFrame, getHealth, getMassing, getPlan, getSite, getSiteGrid,
 } from "./api";
 import PlanView from "./components/PlanView";
 import ProgramEditor from "./components/ProgramEditor";
@@ -119,6 +119,10 @@ export default function App() {
   const planSvgRef = useRef(null);
   const [pngBusy, setPngBusy] = useState(false);
   const [tab, setTab] = useState("plan");
+  // Set when the backend reports that its own source has changed since
+  // it started. Not an error -- the server is fine, it is just answering
+  // from code that no longer exists on disk.
+  const [stale, setStale] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [layers, setLayers] = useState({
@@ -139,6 +143,7 @@ export default function App() {
     getFacadeCatalog().then(setFacadeCatalog).catch((e) =>
       setFacadeCatalog({ error: e.message })
     );
+    getHealth().then((h) => setStale(h.stale ? h : null)).catch(() => setStale(null));
     getSite().then(setSite).catch(() => setSite(null));
     getSiteGrid().then(setGrid).catch(() => setGrid(null));
   }, []);
@@ -187,6 +192,9 @@ export default function App() {
       setPlan(p);
       setMassing(m);
       setEnvelope(env);
+      // Re-checked here rather than only on load: the usual way to meet
+      // this is to edit the engine and press Regenerate.
+      getHealth().then((h) => setStale(h.stale ? h : null)).catch(() => {});
       setFrame(f);
       setBuildFrame(bf);
       setFacade(fa);
@@ -391,6 +399,23 @@ export default function App() {
               sidebar is what you fix it with, so pushing that down was
               backwards. */}
           {error && <div className="banner">{error}</div>}
+
+          {/* The server telling you it is answering from code that no
+              longer exists on disk. Its own report, not a guess from
+              here — see /api/health. Placed above the stats because
+              every number below it is from the old engine. */}
+          {stale && (
+            <div className="banner warn">
+              <b>The API is running older code.</b> The engine has changed on disk
+              since the server started
+              {stale.changed_files?.length
+                ? ` (${stale.changed_files.slice(0, 4).join(", ")}${
+                    stale.changed_files.length > 4 ? `, +${stale.changed_files.length - 4} more` : ""})`
+                : ""}
+              , so everything below is from the old code. Restart it:{" "}
+              <code>uvicorn app.main:app --port 8000</code>
+            </div>
+          )}
 
           <dl className="stats">
             <div className="stat"><dt>Units</dt><dd>{plan?.elements.filter((e) => e.kind === "unit").length ?? "—"}</dd></div>
