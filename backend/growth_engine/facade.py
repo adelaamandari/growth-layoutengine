@@ -485,7 +485,8 @@ def build_facade(plan: FloorPlan, pitch_cm: float | None = None,
                     if n_span < 1:
                         continue
                     b0 = s0 + ((s1 - s0) - n_span * step) / 2
-                    usable += [b0 + (i + 0.5) * step for i in range(n_span)]
+                    usable += [b0 + (i + 0.5) * step for i in range(n_span)
+                               if _fits(b0 + (i + 0.5) * step)]
 
             # And per WALL, for any wall wide enough to take a panel that
             # still ended up with none.
@@ -508,8 +509,16 @@ def build_facade(plan: FloorPlan, pitch_cm: float | None = None,
                     continue                  # already has one
                 n_w = int((t1 - t0) // step)
                 b0 = t0 + ((t1 - t0) - n_w * step) / 2
-                usable += [b0 + (i + 0.5) * step for i in range(n_w)]
+                usable += [b0 + (i + 0.5) * step for i in range(n_w)
+                           if _fits(b0 + (i + 0.5) * step)]
             usable.sort()
+
+            # Both fallbacks run their candidates through _fits, the same
+            # whole-panel-on-real-wall test the line datum uses. They did
+            # not, and it showed: a bay centred inside a wall can still
+            # have half its panel out past the end of it, and 6 panels
+            # came out hanging up to 1.32m into open air. Centred on wall
+            # is not the same as ON wall.
 
             for k, t in enumerate(usable):
                 a = t - panel_w / 2
